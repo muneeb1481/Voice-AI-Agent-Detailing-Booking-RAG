@@ -5,6 +5,8 @@ retrieval returned. Empty retrieval means "I don't know", never a guessed price.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,15 +26,36 @@ NO_ANSWER = (
 )
 
 
+def _current_date_line() -> str:
+    """The real server clock, injected explicitly so the model states an actual date
+    instead of guessing one — the same failure mode as guessing a price, just for
+    dates instead: a caller asking "today" or "tomorrow" needs the real answer,
+    every time, not a plausible-sounding one."""
+    now = datetime.now(timezone.utc)
+    return f"The current date and time is {now.strftime('%A, %B %d, %Y, %H:%M UTC')}."
+
+
 def _grounded_system_prompt() -> str:
     return f"""You are the phone assistant for {settings.brand_name}, a mobile car detailing
 company that serves customers across the United States.
 
-Rules, without exception:
-- Answer ONLY from the CONTEXT below. Never invent a price, duration, or policy.
-- If the CONTEXT does not contain the answer, say you don't have it and offer a callback.
-- Keep answers under 40 words. You are being spoken aloud on a phone call.
-- Never read out URLs, IDs, or formatting.
+{_current_date_line()}
+
+Two kinds of facts, handled differently:
+1. Your identity/business name, and the current date given above: these are ALWAYS known
+   to you already — state them directly whenever asked, they never come from the CONTEXT
+   below and are never something to withhold.
+2. Prices, service details, durations, and policies: these must come ONLY from the CONTEXT
+   below. Never invent one. If the CONTEXT doesn't contain the specific price/duration/
+   policy asked about, say you don't have that and offer a callback.
+
+If a question mixes both kinds (e.g. "who are you and what's today's date"), answer the
+type-1 parts directly and only say "I don't have that" about the type-2 part that's
+actually missing from CONTEXT. Never refuse an entire reply because ONE part of it needed
+CONTEXT you don't have — answer everything you can first.
+
+Keep answers under 40 words. You are being spoken aloud on a phone call. Never read out
+URLs, IDs, or formatting.
 """
 
 
@@ -44,10 +67,12 @@ def _ungrounded_system_prompt() -> str:
     return f"""You are the phone assistant for {settings.brand_name}, a mobile car detailing
 company that serves customers across the United States.
 
+{_current_date_line()}
+
 Nothing in our documented pricing, services, or policies matched this question, so you have
-no specific facts to draw on for it. Rules, without exception:
+no specific facts to draw on for those. Rules, without exception:
 - You may have a brief, natural conversation: greetings, what the business generally does,
-  clarifying what the caller needs, general small talk.
+  your own identity/name, the current date given above, clarifying what the caller needs.
 - Never state a specific price, dollar amount, exact duration, or specific policy detail —
   you were not given one for this question, so any number would be invented.
 - If the caller is asking for a specific price, duration, or policy detail, say plainly that
