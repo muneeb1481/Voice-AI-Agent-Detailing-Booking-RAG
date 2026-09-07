@@ -1,8 +1,13 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+# Business hours are validated in the booking's own state's local time — these
+# tests default to KY (America/New_York), so times here are built in that zone.
+EASTERN = ZoneInfo("America/New_York")
 
 
 def future(days: int = 2, hour: int = 11) -> str:
-    d = datetime.now(timezone.utc) + timedelta(days=days)
+    d = datetime.now(EASTERN) + timedelta(days=days)
     return d.replace(hour=hour, minute=0, second=0, microsecond=0).isoformat()
 
 

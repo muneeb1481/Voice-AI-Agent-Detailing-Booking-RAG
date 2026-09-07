@@ -5,13 +5,17 @@
       "type": "function",
       "function": {
         "name": "ask",
-        "description": "Answer a caller question about pricing, services, service area, or policy. ALWAYS use this instead of answering from your own knowledge. If it returns grounded=false, you may still have a brief natural conversation, but never state a specific price, duration, or policy detail — offer a callback for that instead.",
+        "description": "Answer a caller question about pricing, services, service area, policy, or the current date. ALWAYS use this instead of answering from your own knowledge. If it returns grounded=false, you may still have a brief natural conversation, but never state a specific price, duration, or policy detail — offer a callback for that instead.",
         "parameters": {
           "type": "object",
           "properties": {
             "question": {
               "type": "string",
               "description": "The caller's question, in their own words."
+            },
+            "state": {
+              "type": "string",
+              "description": "The caller's US state, if you've already learned it this call (e.g. while collecting booking details) — makes 'today'/'tomorrow' answers correct for their local time. Omit if not yet known; it will default to Eastern time."
             }
           },
           "required": ["question"]

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Booking, BookingStatus, Customer, Service
 from app.schemas import BookingCreate, ParsedBookingCreate, SlotOut
+from app.services.timezones import timezone_for_state
 from app.services.vehicle import classify_vehicle_smart, is_large_vehicle
 
 BUSINESS_OPEN = time(8, 0)
@@ -57,15 +58,22 @@ def _overlaps(db: Session, state: str, start: datetime, end: datetime, exclude_i
     return db.execute(stmt).scalars().all()
 
 
-def validate_window(start: datetime, end: datetime) -> None:
+def validate_window(state: str | None, start: datetime, end: datetime) -> None:
+    """Business hours are checked in the job's own local time — a slot valid for a
+    Tennessee booking and invalid for a California one at the same UTC instant is
+    exactly the point: 8am-6pm means the customer's 8am-6pm, not the server's."""
+    tz = timezone_for_state(state)
+    local_start = start.astimezone(tz)
+    local_end = end.astimezone(tz)
     now = datetime.now(timezone.utc)
+
     if start <= now:
         raise _bad_request("That time is in the past. Pick an upcoming time.")
     if start > now + timedelta(days=MAX_DAYS_AHEAD):
         raise _bad_request(f"We only book up to {MAX_DAYS_AHEAD} days ahead.")
-    if not (BUSINESS_OPEN <= start.time() < BUSINESS_CLOSE):
-        raise _bad_request("That is outside business hours (8:00-18:00).")
-    if end.time() > BUSINESS_CLOSE and end.date() == start.date():
+    if not (BUSINESS_OPEN <= local_start.time() < BUSINESS_CLOSE):
+        raise _bad_request("That is outside business hours (8:00-18:00 local time).")
+    if local_end.time() > BUSINESS_CLOSE and local_end.date() == local_start.date():
         raise _bad_request("That appointment would run past closing time.")
 
 
@@ -75,8 +83,11 @@ def list_slots(
     day: datetime,
     duration_minutes: int = 90,
 ) -> list[SlotOut]:
-    day_start = _as_utc(datetime.combine(day.date(), BUSINESS_OPEN))
-    day_end = _as_utc(datetime.combine(day.date(), BUSINESS_CLOSE))
+    tz = timezone_for_state(state)
+    # `day` names a calendar date; business hours are that date's 8am-6pm in the
+    # job's own state, not the server's UTC clock.
+    day_start = datetime.combine(day.date(), BUSINESS_OPEN, tzinfo=tz).astimezone(timezone.utc)
+    day_end = datetime.combine(day.date(), BUSINESS_CLOSE, tzinfo=tz).astimezone(timezone.utc)
     now = datetime.now(timezone.utc)
 
     booked = _overlaps(db, state, day_start, day_end)
@@ -128,7 +139,7 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
         duration = service.duration_minutes
 
     end = start + timedelta(minutes=duration)
-    validate_window(start, end)
+    validate_window(payload.state, start, end)
 
     if _overlaps(db, payload.state, start, end):
         raise HTTPException(
@@ -219,7 +230,7 @@ def reschedule_booking(
         (booking.ends_at - booking.starts_at).total_seconds() // 60
     )
     end = start + timedelta(minutes=minutes)
-    validate_window(start, end)
+    validate_window(booking.state, start, end)
 
     if _overlaps(db, booking.state, start, end, exclude_id=booking.id):
         raise HTTPException(

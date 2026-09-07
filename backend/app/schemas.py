@@ -174,6 +174,22 @@ class DocumentOut(ORMModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=4, ge=1, le=10)
+    state: str | None = Field(
+        default=None,
+        max_length=20,
+        description="Caller's state if already known this call, for a locally-correct "
+        "'today' — not validated as strictly as a booking's state, a best-effort hint.",
+    )
+
+    @field_validator("state")
+    @classmethod
+    def _normalize_state(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        try:
+            return normalize_state(v)
+        except ValueError:
+            return None  # best-effort hint — an unrecognized value just falls back to default
 
 
 class RetrievedChunk(BaseModel):

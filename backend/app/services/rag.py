@@ -5,8 +5,6 @@ retrieval returned. Empty retrieval means "I don't know", never a guessed price.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,6 +13,7 @@ from app.config import get_settings
 from app.models import Document, DocumentChunk
 from app.schemas import AskResponse, RetrievedChunk
 from app.services.embeddings import cosine_similarity, get_embedder
+from app.services.timezones import local_now
 
 settings = get_settings()
 
@@ -26,20 +25,22 @@ NO_ANSWER = (
 )
 
 
-def _current_date_line() -> str:
-    """The real server clock, injected explicitly so the model states an actual date
+def _current_date_line(state: str | None = None) -> str:
+    """The real local clock, injected explicitly so the model states an actual date
     instead of guessing one — the same failure mode as guessing a price, just for
     dates instead: a caller asking "today" or "tomorrow" needs the real answer,
-    every time, not a plausible-sounding one."""
-    now = datetime.now(timezone.utc)
-    return f"The current date and time is {now.strftime('%A, %B %d, %Y, %H:%M UTC')}."
+    every time, not a plausible-sounding one. Uses the caller's state when known
+    (so "today" matches their calendar day, not the server's UTC one); Eastern —
+    the most common US "business time" — when it isn't."""
+    now = local_now(state)
+    return f"The current date and time is {now.strftime('%A, %B %d, %Y, %H:%M %Z')}."
 
 
-def _grounded_system_prompt() -> str:
+def _grounded_system_prompt(state: str | None = None) -> str:
     return f"""You are the phone assistant for {settings.brand_name}, a mobile car detailing
 company that serves customers across the United States.
 
-{_current_date_line()}
+{_current_date_line(state)}
 
 Two kinds of facts, handled differently:
 1. Your identity/business name, and the current date given above: these are ALWAYS known
@@ -59,7 +60,7 @@ URLs, IDs, or formatting.
 """
 
 
-def _ungrounded_system_prompt() -> str:
+def _ungrounded_system_prompt(state: str | None = None) -> str:
     # No matching document chunk was found. The model may still have a normal
     # conversation — greetings, "what do you do", small talk — but it must not
     # invent the one thing this whole system exists to protect: a specific price,
@@ -67,7 +68,7 @@ def _ungrounded_system_prompt() -> str:
     return f"""You are the phone assistant for {settings.brand_name}, a mobile car detailing
 company that serves customers across the United States.
 
-{_current_date_line()}
+{_current_date_line(state)}
 
 Nothing in our documented pricing, services, or policies matched this question, so you have
 no specific facts to draw on for those. Rules, without exception:
@@ -141,13 +142,13 @@ def _distance(chunk: DocumentChunk, query_vec: list[float]) -> float:
     return 1.0 - cosine_similarity(query_vec, list(chunk.embedding or []))
 
 
-def answer(db: Session, question: str, top_k: int = 4) -> AskResponse:
+def answer(db: Session, question: str, top_k: int = 4, state: str | None = None) -> AskResponse:
     sources = retrieve(db, question, top_k)
 
     if sources:
         context = "\n\n---\n\n".join(f"[{s.document_title}] {s.content}" for s in sources)
         messages = [
-            {"role": "system", "content": _grounded_system_prompt()},
+            {"role": "system", "content": _grounded_system_prompt(state)},
             {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"},
         ]
         text = _complete(messages, fallback=context.split("\n\n---\n\n")[0])
@@ -156,7 +157,7 @@ def answer(db: Session, question: str, top_k: int = 4) -> AskResponse:
     # No matching chunk: still let the LLM respond naturally, just without a
     # license to invent the specific fact nothing backs up.
     messages = [
-        {"role": "system", "content": _ungrounded_system_prompt()},
+        {"role": "system", "content": _ungrounded_system_prompt(state)},
         {"role": "user", "content": question},
     ]
     text = _complete(messages, fallback=NO_ANSWER)

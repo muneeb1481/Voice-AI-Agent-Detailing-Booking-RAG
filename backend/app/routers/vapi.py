@@ -58,7 +58,7 @@ def verify_vapi_or_admin(
 
 @router.post("/ask", response_model=AskResponse, dependencies=[Depends(verify_vapi_or_admin)])
 def ask(payload: AskRequest, db: Session = Depends(get_db)) -> AskResponse:
-    result = rag.answer(db, payload.question, payload.top_k)
+    result = rag.answer(db, payload.question, payload.top_k, payload.state)
     db.add(
         CallLog(question=payload.question, answer=result.answer, tool_name="ask")
     )

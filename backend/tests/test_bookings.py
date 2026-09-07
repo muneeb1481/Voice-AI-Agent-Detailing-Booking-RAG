@@ -1,8 +1,13 @@
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+# Business hours are validated in the booking's own state's local time — these
+# tests default to TN (America/Chicago), so times here are built in that zone.
+CENTRAL = ZoneInfo("America/Chicago")
 
 
 def future(days: int = 2, hour: int = 10) -> str:
-    d = datetime.now(timezone.utc) + timedelta(days=days)
+    d = datetime.now(CENTRAL) + timedelta(days=days)
     return d.replace(hour=hour, minute=0, second=0, microsecond=0).isoformat()
 
 
