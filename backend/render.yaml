@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: detailing-voice-api
+    name: shinepro-detailing-api
     runtime: python
     plan: free
     rootDir: backend
@@ -18,7 +18,13 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: GROQ_API_KEYS
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
       - key: VAPI_SECRET
         generateValue: true
       - key: CORS_ORIGINS
         sync: false
+      - key: BRAND_NAME
+        value: ShinePro Detailing
