@@ -28,13 +28,16 @@ export function RescheduleModal({ booking, onClose, onDone }: Props) {
   }, [booking])
 
   useEffect(() => {
-    if (!booking || !day) return
+    if (!booking || !day || !booking.state) {
+      setSlots(booking && !booking.state ? [] : null)
+      return
+    }
     setSlots(null)
     const minutes = Math.round(
       (new Date(booking.ends_at).getTime() - new Date(booking.starts_at).getTime()) / 60000,
     )
     api
-      .slots(booking.market, `${day}T00:00:00Z`, minutes)
+      .slots(booking.state, `${day}T00:00:00Z`, minutes)
       .then(setSlots)
       .catch(() => setSlots([]))
   }, [booking, day])
@@ -60,7 +63,7 @@ export function RescheduleModal({ booking, onClose, onDone }: Props) {
       title="Reschedule appointment"
       description={
         booking
-          ? `${booking.customer.name} · ${booking.market} · currently ${formatTime(booking.starts_at)}`
+          ? `${booking.customer.name}${booking.state ? ` · ${booking.state}` : ''} · currently ${formatTime(booking.starts_at)}`
           : undefined
       }
       footer={
@@ -90,7 +93,9 @@ export function RescheduleModal({ booking, onClose, onDone }: Props) {
             </div>
           ) : slots.length === 0 ? (
             <p className="rounded-lg border border-token bg-[rgb(var(--bg-subtle))] px-3 py-6 text-center text-xs text-muted">
-              Nothing open that day in {booking?.market}. Try another date.
+              {booking && !booking.state
+                ? 'This job has no state set, so slot availability cannot be checked. Pick a time directly with the customer.'
+                : `Nothing open that day in ${booking?.state}. Try another date.`}
             </p>
           ) : (
             <div className="scroll-thin grid max-h-64 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">

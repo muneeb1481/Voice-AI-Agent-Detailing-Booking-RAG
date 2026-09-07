@@ -5,7 +5,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.db import SessionLocal, init_db
-from app.models import Document, Market
+from app.models import Document
 from app.schemas import BookingCreate
 from app.seed import seed
 from app.services import booking as booking_service
@@ -13,7 +13,7 @@ from app.services.chunking import chunk_text
 from app.services.rag import ingest_document
 
 PRICING_DOC = """
-MOBILE DETAILING - SERVICES AND PRICING
+SHINEPRO DETAILING - SERVICES AND PRICING
 
 Express Wash and Wax - 79 dollars, about 60 minutes. Exterior hand wash, spray wax,
 tire dressing, windows.
@@ -31,8 +31,8 @@ Headlight Restoration - 99 dollars, about 45 minutes. Both headlights sanded, po
 and UV sealed.
 
 SERVICE AREA
-We are fully mobile and serve Memphis, Nashville and Louisville. There is no travel fee
-within 20 miles of downtown in each market. Beyond 20 miles we add 1 dollar per mile.
+We are fully mobile and serve customers across the United States. There is no travel fee
+within 20 miles of your city center. Beyond 20 miles we add 1 dollar per mile.
 
 HOURS AND POLICY
 We book appointments from 8am to 6pm, seven days a week. We need access to the vehicle
@@ -41,12 +41,12 @@ are charged a 25 dollar fee. We do not do paintless dent repair or windshield re
 """
 
 CUSTOMERS = [
-    ("Dana Reed", "+19015550142", Market.memphis, "2019 Toyota Tacoma", "Marcus"),
-    ("Priya Shah", "+16155550118", Market.nashville, "2022 Tesla Model Y", "Alexis"),
-    ("Ray Ortiz", "+15025550188", Market.louisville, "2016 Honda Accord", "Jordan"),
-    ("Tom Whitfield", "+19015550190", Market.memphis, "2021 Ford F-150", "Marcus"),
-    ("Nina Alvarez", "+16155550133", Market.nashville, "2018 Subaru Outback", "Alexis"),
-    ("Chris Boyd", "+15025550171", Market.louisville, "2020 Jeep Wrangler", "Jordan"),
+    ("Dana Reed", "+19015550142", "TN", "38103", "2019 Toyota Tacoma", "Marcus"),
+    ("Priya Shah", "+16155550118", "TN", "37201", "2022 Tesla Model Y", "Alexis"),
+    ("Ray Ortiz", "+15025550188", "KY", "40202", "2016 Honda Accord", "Jordan"),
+    ("Tom Whitfield", "+13055550190", "FL", "33101", "2021 Ford F-150", "Diego"),
+    ("Nina Alvarez", "+12135550133", "CA", "90012", "2018 Subaru Outback", "Sam"),
+    ("Chris Boyd", "+12065550171", "WA", "98101", "2020 Jeep Wrangler", "Riley"),
 ]
 
 
@@ -70,7 +70,7 @@ def main() -> None:
 
         base = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
         created = 0
-        for i, (name, phone, market, vehicle, detailer) in enumerate(CUSTOMERS):
+        for i, (name, phone, state, zip_code, vehicle, detailer) in enumerate(CUSTOMERS):
             start = (base + timedelta(days=i // 2 + 1)).replace(hour=9 + (i % 2) * 4)
             try:
                 booking_service.create_booking(
@@ -78,7 +78,8 @@ def main() -> None:
                     BookingCreate(
                         customer_name=name,
                         customer_phone=phone,
-                        market=market,
+                        state=state,
+                        zip_code=zip_code,
                         starts_at=start,
                         duration_minutes=90,
                         vehicle=vehicle,

@@ -10,7 +10,8 @@ def payload(**over):
     base = {
         "customer_name": "Dana Reed",
         "customer_phone": "+19015550142",
-        "market": "memphis",
+        "state": "TN",
+        "zip_code": "38103",
         "starts_at": future(),
         "duration_minutes": 90,
         "vehicle": "2019 Tacoma",
@@ -36,11 +37,11 @@ def test_double_booking_rejected(client, auth):
     assert clash.status_code == 409
 
 
-def test_different_market_can_share_a_slot(client, auth):
+def test_different_state_can_share_a_slot(client, auth):
     client.post("/api/bookings", json=payload(), headers=auth)
     other = client.post(
         "/api/bookings",
-        json=payload(market="nashville", customer_phone="+16155550101"),
+        json=payload(state="KY", customer_phone="+16155550101"),
         headers=auth,
     )
     assert other.status_code == 201
@@ -84,27 +85,96 @@ def test_cancel_then_reschedule_rejected(client, auth):
 def test_slots_exclude_booked_time(client, auth):
     day = future(days=5, hour=0)
     before = client.get(
-        "/api/slots", params={"market": "memphis", "day": day}, headers=auth
+        "/api/slots", params={"state": "TN", "day": day}, headers=auth
     ).json()
     client.post("/api/bookings", json=payload(starts_at=future(days=5, hour=10)), headers=auth)
     after = client.get(
-        "/api/slots", params={"market": "memphis", "day": day}, headers=auth
+        "/api/slots", params={"state": "TN", "day": day}, headers=auth
     ).json()
     assert len(after) < len(before)
 
 
-def test_filter_by_market(client, auth):
+def test_filter_by_state(client, auth):
     client.post("/api/bookings", json=payload(), headers=auth)
     client.post(
         "/api/bookings",
-        json=payload(market="nashville", customer_phone="+16155550101"),
+        json=payload(state="KY", customer_phone="+16155550101"),
         headers=auth,
     )
-    memphis = client.get("/api/bookings", params={"market": "memphis"}, headers=auth).json()
-    assert len(memphis) == 1
+    tn = client.get("/api/bookings", params={"state": "TN"}, headers=auth).json()
+    assert len(tn) == 1
 
 
 def test_stats(client, auth):
     client.post("/api/bookings", json=payload(), headers=auth)
     stats = client.get("/api/stats", headers=auth).json()
     assert stats["upcoming"] == 1
+
+
+def test_state_full_name_normalizes_to_code(client, auth):
+    resp = client.post("/api/bookings", json=payload(state="Tennessee"), headers=auth)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["state"] == "TN"
+
+
+def test_invalid_state_rejected(client, auth):
+    resp = client.post("/api/bookings", json=payload(state="Atlantis"), headers=auth)
+    assert resp.status_code == 422
+
+
+def test_invalid_zip_rejected(client, auth):
+    resp = client.post("/api/bookings", json=payload(zip_code="not-a-zip"), headers=auth)
+    assert resp.status_code == 422
+
+
+def test_detailer_search_is_partial_and_case_insensitive(client, auth):
+    booking_id = client.post(
+        "/api/bookings", json=payload(detailer="Marcus Reed"), headers=auth
+    ).json()["id"]
+    found = client.get("/api/bookings", params={"detailer": "marc"}, headers=auth).json()
+    assert len(found) == 1
+    assert found[0]["id"] == booking_id
+
+
+def test_assign_detailer_after_booking_created(client, auth):
+    booking_id = client.post("/api/bookings", json=payload(), headers=auth).json()["id"]
+    resp = client.patch(
+        f"/api/bookings/{booking_id}/detailer",
+        json={"detailer": "Jordan"},
+        headers=auth,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["detailer"] == "Jordan"
+
+
+def test_price_computed_from_service_and_vehicle_category(client, auth):
+    services = client.get("/api/services", headers=auth).json()
+    ceramic = next(s for s in services if s["name"] == "Ceramic Coating")
+
+    sedan = client.post(
+        "/api/bookings",
+        json=payload(service_id=ceramic["id"], vehicle="Toyota Corolla"),
+        headers=auth,
+    ).json()
+    assert sedan["price_cents"] == ceramic["price_cents"]
+    assert sedan["vehicle_category"] == "sedan"
+
+    truck = client.post(
+        "/api/bookings",
+        json=payload(
+            service_id=ceramic["id"],
+            vehicle="Ford F-150",
+            customer_phone="+19015550999",
+            starts_at=future(days=3),
+        ),
+        headers=auth,
+    ).json()
+    assert truck["price_cents"] == ceramic["price_cents"] + ceramic["large_vehicle_surcharge_cents"]
+    assert truck["vehicle_category"] == "truck"
+
+
+def test_price_override_wins_over_catalog(client, auth):
+    booking = client.post(
+        "/api/bookings", json=payload(price_cents=5000), headers=auth
+    ).json()
+    assert booking["price_cents"] == 5000

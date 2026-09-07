@@ -5,18 +5,23 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
-from app.models import Booking, BookingStatus, Document, DocumentChunk, Market, Service
+from app.models import Booking, BookingStatus, Document, DocumentChunk, Service
 from app.schemas import (
     BookingCreate,
     BookingOut,
     BookingReschedule,
     BookingStatusUpdate,
     DashboardStats,
+    DetailerUpdate,
+    ParsedBookingCreate,
+    ParsedJob,
+    ParseJobRequest,
     ServiceOut,
     SlotOut,
 )
 from app.security import current_admin
 from app.services import booking as booking_service
+from app.services.job_parser import parse_job_text
 
 router = APIRouter(prefix="/api", tags=["bookings"])
 
@@ -25,7 +30,7 @@ router = APIRouter(prefix="/api", tags=["bookings"])
 def list_bookings(
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
-    market: Market | None = Query(default=None),
+    state: str | None = Query(default=None, min_length=2, max_length=2),
     detailer: str | None = Query(default=None),
     status_filter: BookingStatus | None = Query(default=None, alias="status"),
     db: Session = Depends(get_db),
@@ -36,10 +41,10 @@ def list_bookings(
         stmt = stmt.where(Booking.starts_at >= date_from)
     if date_to:
         stmt = stmt.where(Booking.starts_at <= date_to)
-    if market:
-        stmt = stmt.where(Booking.market == market)
+    if state:
+        stmt = stmt.where(Booking.state == state.upper())
     if detailer:
-        stmt = stmt.where(Booking.detailer == detailer)
+        stmt = stmt.where(Booking.detailer.ilike(f"%{detailer}%"))
     if status_filter:
         stmt = stmt.where(Booking.status == status_filter)
     return list(db.execute(stmt).scalars().unique().all())
@@ -74,15 +79,41 @@ def update_status(
     return booking_service.set_status(db, booking_id, payload.status)
 
 
+@router.patch("/bookings/{booking_id}/detailer", response_model=BookingOut)
+def update_detailer(
+    booking_id: str,
+    payload: DetailerUpdate,
+    db: Session = Depends(get_db),
+    _: str = Depends(current_admin),
+) -> Booking:
+    return booking_service.set_detailer(db, booking_id, payload.detailer)
+
+
+@router.post("/parse-job", response_model=ParsedJob)
+def parse_job(
+    payload: ParseJobRequest, _: str = Depends(current_admin)
+) -> ParsedJob:
+    return ParsedJob(**parse_job_text(payload.text))
+
+
+@router.post("/bookings/parsed", response_model=BookingOut, status_code=201)
+def create_parsed_booking(
+    payload: ParsedBookingCreate,
+    db: Session = Depends(get_db),
+    _: str = Depends(current_admin),
+) -> Booking:
+    return booking_service.create_parsed_booking(db, payload)
+
+
 @router.get("/slots", response_model=list[SlotOut])
 def slots(
-    market: Market,
+    state: str,
     day: datetime,
     duration_minutes: int = 90,
     db: Session = Depends(get_db),
     _: str = Depends(current_admin),
 ) -> list[SlotOut]:
-    return booking_service.list_slots(db, market, day, duration_minutes)
+    return booking_service.list_slots(db, state.upper(), day, duration_minutes)
 
 
 @router.get("/services", response_model=list[ServiceOut])
@@ -104,9 +135,13 @@ def stats(db: Session = Depends(get_db), _: str = Depends(current_admin)) -> Das
             stmt = stmt.where(c)
         return db.execute(stmt).scalar_one()
 
-    by_market = {
-        m.value: count(Booking.market == m, Booking.starts_at >= week_start) for m in Market
-    }
+    state_rows = db.execute(
+        select(Booking.state, func.count())
+        .where(Booking.starts_at >= week_start)
+        .where(Booking.state.isnot(None))
+        .group_by(Booking.state)
+    ).all()
+    by_state = {state: n for state, n in state_rows}
     by_status = {
         s.value: count(Booking.status == s, Booking.starts_at >= week_start)
         for s in BookingStatus
@@ -126,6 +161,6 @@ def stats(db: Session = Depends(get_db), _: str = Depends(current_admin)) -> Das
         ),
         documents=db.execute(select(func.count()).select_from(Document)).scalar_one(),
         chunks=db.execute(select(func.count()).select_from(DocumentChunk)).scalar_one(),
-        by_market=by_market,
+        by_state=by_state,
         by_status=by_status,
     )

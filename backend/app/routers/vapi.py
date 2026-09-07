@@ -7,14 +7,19 @@ supplies trust.
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi.security import HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+
+from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import CallLog, Market
-from app.schemas import AskRequest, AskResponse, BookingCreate
+from app.models import CallLog, Service
+from app.schemas import AskRequest, AskResponse, VoiceBookingCreate
+from app.security import bearer_scheme
 from app.services import booking as booking_service
+from app.services.us_states import normalize_state
 from app.services import rag
 
 settings = get_settings()
@@ -28,7 +33,30 @@ def verify_vapi(x_vapi_secret: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad tool secret")
 
 
-@router.post("/ask", response_model=AskResponse, dependencies=[Depends(verify_vapi)])
+def verify_vapi_or_admin(
+    x_vapi_secret: str | None = Header(default=None),
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> None:
+    """Accept either the Vapi tool secret (real phone calls) or an admin session
+    (the dashboard's Agent Test page) — so testing from the browser doesn't need the
+    tool secret baked into the frontend, and a bad/missing tool secret doesn't get
+    mistaken for an expired admin login."""
+    if not settings.vapi_secret:
+        return
+    if x_vapi_secret == settings.vapi_secret:
+        return
+    if creds is not None:
+        import jwt  # noqa: PLC0415
+
+        try:
+            jwt.decode(creds.credentials, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+            return
+        except jwt.PyJWTError:
+            pass
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad tool secret")
+
+
+@router.post("/ask", response_model=AskResponse, dependencies=[Depends(verify_vapi_or_admin)])
 def ask(payload: AskRequest, db: Session = Depends(get_db)) -> AskResponse:
     result = rag.answer(db, payload.question, payload.top_k)
     db.add(
@@ -39,28 +67,57 @@ def ask(payload: AskRequest, db: Session = Depends(get_db)) -> AskResponse:
 
 
 class ListSlotsArgs(BaseModel):
-    market: Market
+    state: str = Field(description="US state, name or 2-letter code")
     day: datetime
     duration_minutes: int = Field(default=90, ge=15, le=600)
+
+    @field_validator("state")
+    @classmethod
+    def _validate_state(cls, v: str) -> str:
+        return normalize_state(v)
 
 
 @router.post("/list_slots", dependencies=[Depends(verify_vapi)])
 def list_slots(args: ListSlotsArgs, db: Session = Depends(get_db)) -> dict:
-    slots = booking_service.list_slots(db, args.market, args.day, args.duration_minutes)
+    slots = booking_service.list_slots(db, args.state, args.day, args.duration_minutes)
     return {
         "count": len(slots),
         "slots": [s.starts_at.isoformat() for s in slots[:8]],
     }
 
 
+@router.post("/list_services", dependencies=[Depends(verify_vapi)])
+def list_services(db: Session = Depends(get_db)) -> dict:
+    """So the agent can quote a real price before booking — never estimate one."""
+    services = db.execute(
+        select(Service).where(Service.active).order_by(Service.name)
+    ).scalars().all()
+    return {
+        "services": [
+            {
+                "service_id": s.id,
+                "name": s.name,
+                "duration_minutes": s.duration_minutes,
+                "price_cents": s.price_cents,
+                "large_vehicle_surcharge_cents": s.large_vehicle_surcharge_cents,
+                "note": "large_vehicle_surcharge_cents applies for SUVs, trucks, vans, and minivans",
+            }
+            for s in services
+        ]
+    }
+
+
 @router.post("/book_appointment", dependencies=[Depends(verify_vapi)])
-def book_appointment(args: BookingCreate, db: Session = Depends(get_db)) -> dict:
+def book_appointment(args: VoiceBookingCreate, db: Session = Depends(get_db)) -> dict:
     booking = booking_service.create_booking(db, args, source="voice")
     return {
         "booking_id": booking.id,
         "starts_at": booking.starts_at.isoformat(),
-        "market": booking.market.value,
+        "state": booking.state,
         "status": booking.status.value,
+        "price_cents": booking.price_cents,
+        "vehicle_category": booking.vehicle_category,
+        "note": "Read the price_cents total back to the caller as a dollar amount to confirm it.",
     }
 
 
@@ -77,7 +134,7 @@ def lookup_appointments(args: LookupArgs, db: Session = Depends(get_db)) -> dict
             {
                 "booking_id": b.id,
                 "starts_at": b.starts_at.isoformat(),
-                "market": b.market.value,
+                "state": b.state,
                 "vehicle": b.vehicle,
             }
             for b in bookings

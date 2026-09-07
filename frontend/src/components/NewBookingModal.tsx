@@ -4,11 +4,13 @@ import { Button } from '@/components/ui/Button'
 import { Input, Label, Select, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { api } from '@/lib/api'
-import { MARKETS, type Service } from '@/lib/types'
+import type { Detailer, Service } from '@/lib/types'
+import { US_STATES } from '@/lib/usStates'
 import { formatMoney } from '@/lib/utils'
 
 interface Props {
   open: boolean
+  detailers: Detailer[]
   onClose: () => void
   onCreated: () => void
 }
@@ -16,7 +18,8 @@ interface Props {
 const EMPTY = {
   customer_name: '',
   customer_phone: '',
-  market: 'memphis',
+  state: 'TN',
+  zip_code: '',
   date: '',
   time: '10:00',
   service_id: '',
@@ -27,7 +30,7 @@ const EMPTY = {
   notes: '',
 }
 
-export function NewBookingModal({ open, onClose, onCreated }: Props) {
+export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) {
   const { notify } = useToast()
   const [form, setForm] = useState(EMPTY)
   const [services, setServices] = useState<Service[]>([])
@@ -53,7 +56,8 @@ export function NewBookingModal({ open, onClose, onCreated }: Props) {
       await api.createBooking({
         customer_name: form.customer_name,
         customer_phone: form.customer_phone,
-        market: form.market,
+        state: form.state,
+        zip_code: form.zip_code,
         starts_at: startsAt,
         service_id: form.service_id || null,
         duration_minutes: Number(form.duration_minutes),
@@ -111,17 +115,31 @@ export function NewBookingModal({ open, onClose, onCreated }: Props) {
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <Label htmlFor="m">Market</Label>
-            <Select id="m" value={form.market} onChange={(e) => set('market', e.target.value)}>
-              {MARKETS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
+            <Label htmlFor="st">State</Label>
+            <Select id="st" value={form.state} onChange={(e) => set('state', e.target.value)}>
+              {US_STATES.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name}
                 </option>
               ))}
             </Select>
           </div>
+          <div>
+            <Label htmlFor="zip">ZIP code</Label>
+            <Input
+              id="zip"
+              required
+              placeholder="38103"
+              pattern="\d{5}(-\d{4})?"
+              value={form.zip_code}
+              onChange={(e) => set('zip_code', e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label htmlFor="d">Date</Label>
             <Input
@@ -192,12 +210,14 @@ export function NewBookingModal({ open, onClose, onCreated }: Props) {
           </div>
           <div>
             <Label htmlFor="det">Detailer</Label>
-            <Input
-              id="det"
-              placeholder="Unassigned"
-              value={form.detailer}
-              onChange={(e) => set('detailer', e.target.value)}
-            />
+            <Select id="det" value={form.detailer} onChange={(e) => set('detailer', e.target.value)}>
+              <option value="">Unassigned</option>
+              {detailers.map((d) => (
+                <option key={d.id} value={d.name}>
+                  {d.name}
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
 

@@ -1,7 +1,5 @@
-export type Market = 'memphis' | 'nashville' | 'louisville'
 export type BookingStatus = 'scheduled' | 'done' | 'rescheduled' | 'cancelled'
 
-export const MARKETS: Market[] = ['memphis', 'nashville', 'louisville']
 export const STATUSES: BookingStatus[] = ['scheduled', 'done', 'rescheduled', 'cancelled']
 
 export interface Customer {
@@ -11,17 +9,23 @@ export interface Customer {
   email: string | null
 }
 
+export type BookingSource = 'voice' | 'admin' | 'parser' | string
+
 export interface Booking {
   id: string
-  market: Market
+  state: string | null
+  zip_code: string | null
   detailer: string | null
   vehicle: string | null
+  vehicle_category: string | null
   address: string | null
   notes: string | null
+  price_cents: number | null
+  service_label: string | null
   starts_at: string
   ends_at: string
   status: BookingStatus
-  source: string
+  source: BookingSource
   customer: Customer
 }
 
@@ -40,6 +44,7 @@ export interface Service {
   name: string
   duration_minutes: number
   price_cents: number
+  large_vehicle_surcharge_cents: number
   active: boolean
 }
 
@@ -50,7 +55,7 @@ export interface Stats {
   cancelled_this_week: number
   documents: number
   chunks: number
-  by_market: Record<string, number>
+  by_state: Record<string, number>
   by_status: Record<string, number>
 }
 
@@ -58,6 +63,25 @@ export interface Slot {
   starts_at: string
   ends_at: string
   detailer: string | null
+}
+
+export interface Detailer {
+  id: string
+  name: string
+  active: boolean
+}
+
+export interface ParsedJob {
+  customer_name: string | null
+  customer_phone: string | null
+  vehicle: string | null
+  state: string | null
+  zip_code: string | null
+  address: string | null
+  service_label: string | null
+  price_cents: number | null
+  starts_at: string | null
+  notes: string | null
 }
 
 export interface AskResponse {

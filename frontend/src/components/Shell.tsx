@@ -69,7 +69,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <Sparkles className="h-4.5 w-4.5" />
             </div>
             <div className="leading-tight">
-              <p className="text-sm font-semibold tracking-tight">Detail Ops</p>
+              <p className="text-sm font-semibold tracking-tight">ShinePro Detailing</p>
               <p className="text-[11px] text-muted">Voice agent console</p>
             </div>
           </div>
@@ -124,7 +124,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </Button>
           <h1 className="text-sm font-semibold">
             {NAV.find((n) => (n.end ? n.to === location.pathname : location.pathname.startsWith(n.to)))
-              ?.label ?? 'Detail Ops'}
+              ?.label ?? 'ShinePro Detailing'}
           </h1>
         </header>
         <main className="relative z-10 mx-auto max-w-7xl px-4 py-6 lg:px-8">{children}</main>

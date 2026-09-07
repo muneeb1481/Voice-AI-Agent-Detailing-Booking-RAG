@@ -44,7 +44,7 @@ export function Login() {
           <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-[rgb(var(--accent))] text-[rgb(var(--accent-fg))]">
             <Sparkles className="h-6 w-6" />
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">Detail Ops</h1>
+          <h1 className="text-xl font-semibold tracking-tight">ShinePro Detailing</h1>
           <p className="mt-1 text-sm text-muted">
             Sign in to manage bookings and the agent's knowledge base.
           </p>

@@ -13,16 +13,11 @@ import {
 import { CalendarClock, CalendarDays, FileText, Layers, XCircle } from 'lucide-react'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { Skeleton, EmptyState } from '@/components/ui/Skeleton'
-import { MarketBadge, StatusBadge } from '@/components/ui/Badge'
+import { StateBadge, StatusBadge } from '@/components/ui/Badge'
 import { api } from '@/lib/api'
 import type { Booking, Stats } from '@/lib/types'
+import { stateColor } from '@/lib/usStates'
 import { formatDate, formatTime } from '@/lib/utils'
-
-const MARKET_COLOR: Record<string, string> = {
-  memphis: 'rgb(var(--memphis))',
-  nashville: 'rgb(var(--nashville))',
-  louisville: 'rgb(var(--louisville))',
-}
 
 function StatTile({
   label,
@@ -64,8 +59,11 @@ export function Dashboard() {
       .catch(() => setUpcoming([]))
   }, [])
 
-  const marketData = stats
-    ? Object.entries(stats.by_market).map(([market, count]) => ({ market, count }))
+  const stateData = stats
+    ? Object.entries(stats.by_state)
+        .map(([state, count]) => ({ state, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 8)
     : []
 
   return (
@@ -110,42 +108,45 @@ export function Dashboard() {
 
       <div className="grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-2">
-          <CardHeader title="Bookings by market" subtitle="Current week" />
+          <CardHeader title="Bookings by state" subtitle="Current week, top 8" />
           <CardBody className="h-64 pt-2">
             {stats ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={marketData} margin={{ left: -20, right: 8, top: 8 }}>
-                  <CartesianGrid vertical={false} stroke="rgb(var(--border))" />
-                  <XAxis
-                    dataKey="market"
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fill: 'rgb(var(--fg-muted))', fontSize: 11 }}
-                    tickFormatter={(m: string) => m.charAt(0).toUpperCase() + m.slice(1)}
-                  />
-                  <YAxis
-                    allowDecimals={false}
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fill: 'rgb(var(--fg-muted))', fontSize: 11 }}
-                  />
-                  <Tooltip
-                    cursor={{ fill: 'rgb(var(--bg-subtle))' }}
-                    contentStyle={{
-                      background: 'rgb(var(--panel))',
-                      border: '1px solid rgb(var(--border))',
-                      borderRadius: 10,
-                      fontSize: 12,
-                      color: 'rgb(var(--fg))',
-                    }}
-                  />
-                  <Bar dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={48}>
-                    {marketData.map((d) => (
-                      <Cell key={d.market} fill={MARKET_COLOR[d.market]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              stateData.length === 0 ? (
+                <EmptyState title="No bookings this week yet" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={stateData} margin={{ left: -20, right: 8, top: 8 }}>
+                    <CartesianGrid vertical={false} stroke="rgb(var(--border))" />
+                    <XAxis
+                      dataKey="state"
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fill: 'rgb(var(--fg-muted))', fontSize: 11 }}
+                    />
+                    <YAxis
+                      allowDecimals={false}
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fill: 'rgb(var(--fg-muted))', fontSize: 11 }}
+                    />
+                    <Tooltip
+                      cursor={{ fill: 'rgb(var(--bg-subtle))' }}
+                      contentStyle={{
+                        background: 'rgb(var(--panel))',
+                        border: '1px solid rgb(var(--border))',
+                        borderRadius: 10,
+                        fontSize: 12,
+                        color: 'rgb(var(--fg))',
+                      }}
+                    />
+                    <Bar dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={48}>
+                      {stateData.map((d) => (
+                        <Cell key={d.state} fill={stateColor(d.state)} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )
             ) : (
               <Skeleton className="h-full w-full" />
             )}
@@ -194,7 +195,7 @@ export function Dashboard() {
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1.5">
-                    <MarketBadge market={b.market} />
+                    <StateBadge state={b.state} />
                     <StatusBadge status={b.status} />
                   </div>
                 </li>

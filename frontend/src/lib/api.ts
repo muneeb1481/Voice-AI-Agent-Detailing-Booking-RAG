@@ -70,6 +70,15 @@ export const api = {
   stats: () => request<import('./types').Stats>('/api/stats'),
   services: () => request<import('./types').Service[]>('/api/services'),
 
+  detailers: () => request<import('./types').Detailer[]>('/api/detailers'),
+  createDetailer: (name: string) =>
+    request<import('./types').Detailer>('/api/detailers', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  deleteDetailer: (id: string) =>
+    request<void>(`/api/detailers/${id}`, { method: 'DELETE' }),
+
   bookings: (params: Record<string, string | undefined>) => {
     const q = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v) as [string, string][],
@@ -91,9 +100,24 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
-  slots: (market: string, day: string, duration = 90) =>
+  setDetailer: (id: string, detailer: string | null) =>
+    request<import('./types').Booking>(`/api/bookings/${id}/detailer`, {
+      method: 'PATCH',
+      body: JSON.stringify({ detailer }),
+    }),
+  parseJob: (text: string) =>
+    request<import('./types').ParsedJob>('/api/parse-job', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+  createParsedBooking: (body: unknown) =>
+    request<import('./types').Booking>('/api/bookings/parsed', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  slots: (state: string, day: string, duration = 90) =>
     request<import('./types').Slot[]>(
-      `/api/slots?market=${market}&day=${day}&duration_minutes=${duration}`,
+      `/api/slots?state=${state}&day=${day}&duration_minutes=${duration}`,
     ),
 
   documents: () => request<import('./types').Document[]>('/api/documents'),

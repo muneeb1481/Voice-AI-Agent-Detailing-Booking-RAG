@@ -11,7 +11,7 @@ const SAMPLES = [
   'How much is a ceramic coating?',
   'Do you come to my house?',
   'How long does a full interior detail take?',
-  'Do you serve Nashville?',
+  'Do you serve customers in Texas?',
 ]
 
 export function Playground() {

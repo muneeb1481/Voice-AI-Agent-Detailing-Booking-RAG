@@ -10,8 +10,9 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Booking, BookingStatus, Customer, Market, Service
-from app.schemas import BookingCreate, SlotOut
+from app.models import Booking, BookingStatus, Customer, Service
+from app.schemas import BookingCreate, ParsedBookingCreate, SlotOut
+from app.services.vehicle import classify_vehicle_smart, is_large_vehicle
 
 BUSINESS_OPEN = time(8, 0)
 BUSINESS_CLOSE = time(18, 0)
@@ -43,10 +44,10 @@ def get_or_create_customer(
     return customer
 
 
-def _overlaps(db: Session, market: Market, start: datetime, end: datetime, exclude_id: str | None = None):
+def _overlaps(db: Session, state: str, start: datetime, end: datetime, exclude_id: str | None = None):
     stmt = (
         select(Booking)
-        .where(Booking.market == market)
+        .where(Booking.state == state)
         .where(Booking.status.in_([BookingStatus.scheduled, BookingStatus.rescheduled]))
         .where(Booking.starts_at < end)
         .where(Booking.ends_at > start)
@@ -70,7 +71,7 @@ def validate_window(start: datetime, end: datetime) -> None:
 
 def list_slots(
     db: Session,
-    market: Market,
+    state: str,
     day: datetime,
     duration_minutes: int = 90,
 ) -> list[SlotOut]:
@@ -78,7 +79,7 @@ def list_slots(
     day_end = _as_utc(datetime.combine(day.date(), BUSINESS_CLOSE))
     now = datetime.now(timezone.utc)
 
-    booked = _overlaps(db, market, day_start, day_end)
+    booked = _overlaps(db, state, day_start, day_end)
     slots: list[SlotOut] = []
 
     cursor = day_start
@@ -96,6 +97,25 @@ def list_slots(
     return slots
 
 
+def _price_for(
+    service: Service | None, vehicle_text: str | None, override_cents: int | None
+) -> tuple[str | None, int | None]:
+    """Category from the vehicle text, plus the price that category implies.
+
+    An explicit override (parser/manual entry) always wins — the point of letting an
+    admin override is that they know the real number better than any inference does.
+    """
+    category = classify_vehicle_smart(vehicle_text)
+    if override_cents is not None:
+        return category, override_cents
+    if service is None:
+        return category, None
+    price = service.price_cents
+    if is_large_vehicle(category):
+        price += service.large_vehicle_surcharge_cents
+    return category, price
+
+
 def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -> Booking:
     start = _as_utc(payload.starts_at)
 
@@ -110,11 +130,13 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
     end = start + timedelta(minutes=duration)
     validate_window(start, end)
 
-    if _overlaps(db, payload.market, start, end):
+    if _overlaps(db, payload.state, start, end):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="That slot is already taken. Offer the caller another time.",
         )
+
+    category, price_cents = _price_for(service, payload.vehicle, payload.price_cents)
 
     customer = get_or_create_customer(
         db, payload.customer_name, payload.customer_phone, payload.customer_email
@@ -122,17 +144,64 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
     booking = Booking(
         customer_id=customer.id,
         service_id=service.id if service else None,
-        market=payload.market,
+        state=payload.state,
+        zip_code=payload.zip_code,
         detailer=payload.detailer,
         vehicle=payload.vehicle,
+        vehicle_category=category,
         address=payload.address,
         notes=payload.notes,
+        price_cents=price_cents,
+        service_label=payload.service_label or (service.name if service else None),
         starts_at=start,
         ends_at=end,
         status=BookingStatus.scheduled,
         source=source,
     )
     db.add(booking)
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
+    """The paste-and-parse quick-intake path. This records a job, not a slot
+    reservation — no business-hours or double-booking check, since the point is to
+    log what already happened (or was agreed) rather than contend for a calendar slot.
+    """
+    start = _as_utc(payload.starts_at) if payload.starts_at else datetime.now(timezone.utc)
+    duration = payload.duration_minutes
+    end = start + timedelta(minutes=duration)
+
+    category, price_cents = _price_for(None, payload.vehicle, payload.price_cents)
+
+    customer = get_or_create_customer(db, payload.customer_name, payload.customer_phone)
+    booking = Booking(
+        customer_id=customer.id,
+        service_id=None,
+        state=payload.state,
+        zip_code=payload.zip_code,
+        detailer=payload.detailer,
+        vehicle=payload.vehicle,
+        vehicle_category=category,
+        address=payload.address,
+        notes=payload.notes,
+        price_cents=price_cents,
+        service_label=payload.service_label,
+        starts_at=start,
+        ends_at=end,
+        status=BookingStatus.scheduled,
+        source="parser",
+    )
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def set_detailer(db: Session, booking_id: str, detailer: str | None) -> Booking:
+    booking = _require(db, booking_id)
+    booking.detailer = detailer
     db.commit()
     db.refresh(booking)
     return booking
@@ -152,7 +221,7 @@ def reschedule_booking(
     end = start + timedelta(minutes=minutes)
     validate_window(start, end)
 
-    if _overlaps(db, booking.market, start, end, exclude_id=booking.id):
+    if _overlaps(db, booking.state, start, end, exclude_id=booking.id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="That slot is already taken."
         )

@@ -15,13 +15,9 @@
   --border: 231 229 228;
   --fg: 28 25 23;
   --fg-muted: 120 113 108;
-  --accent: 217 119 6;
+  --accent: 21 96 214;
   --accent-fg: 255 255 255;
-  --ring: 217 119 6;
-
-  --memphis: 139 92 246;
-  --nashville: 234 88 12;
-  --louisville: 190 24 93;
+  --ring: 21 96 214;
 
   --ok: 22 163 74;
   --warn: 202 138 4;
@@ -38,13 +34,9 @@
   --border: 44 44 50;
   --fg: 244 244 245;
   --fg-muted: 148 148 158;
-  --accent: 245 158 11;
-  --accent-fg: 24 20 8;
-  --ring: 245 158 11;
-
-  --memphis: 167 139 250;
-  --nashville: 251 146 60;
-  --louisville: 244 114 182;
+  --accent: 56 143 245;
+  --accent-fg: 8 15 30;
+  --ring: 56 143 245;
 
   --ok: 74 222 128;
   --warn: 250 204 21;
@@ -101,8 +93,8 @@
     pointer-events: none;
     z-index: 0;
     background:
-      radial-gradient(50% 60% at 20% 0%, rgb(var(--memphis) / 0.16), transparent 70%),
-      radial-gradient(45% 55% at 75% 5%, rgb(var(--accent) / 0.14), transparent 70%);
+      radial-gradient(50% 60% at 20% 0%, rgb(var(--accent) / 0.18), transparent 70%),
+      radial-gradient(45% 55% at 75% 5%, rgb(var(--info) / 0.14), transparent 70%);
     filter: blur(24px);
   }
 

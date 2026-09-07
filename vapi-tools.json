@@ -1,11 +1,11 @@
 {
-  "_comment": "Vapi tool definitions. Replace {{API_BASE}} with your Render URL and {{VAPI_SECRET}} with the value set in the backend env. Schemas mirror backend/app/schemas.py — the backend re-validates everything regardless.",
+  "_comment": "Vapi tool definitions. Replace {{API_BASE}} with your Render URL and {{VAPI_SECRET}} with the value set in the backend env. Schemas mirror backend/app/schemas.py — the backend re-validates everything regardless. Note: book_appointment deliberately has no `detailer` parameter — the caller is never told who's coming, an admin assigns that afterward from the dashboard.",
   "tools": [
     {
       "type": "function",
       "function": {
         "name": "ask",
-        "description": "Answer a caller question about pricing, services, service area, or policy. ALWAYS use this instead of answering from your own knowledge. If it returns grounded=false, tell the caller you do not have that information and offer a callback.",
+        "description": "Answer a caller question about pricing, services, service area, or policy. ALWAYS use this instead of answering from your own knowledge. If it returns grounded=false, you may still have a brief natural conversation, but never state a specific price, duration, or policy detail — offer a callback for that instead.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -26,13 +26,13 @@
       "type": "function",
       "function": {
         "name": "list_slots",
-        "description": "List open appointment times for a market on a given day. Call this before offering the caller any time.",
+        "description": "List open appointment times for a US state on a given day. Call this before offering the caller any time.",
         "parameters": {
           "type": "object",
           "properties": {
-            "market": {
+            "state": {
               "type": "string",
-              "enum": ["memphis", "nashville", "louisville"]
+              "description": "US state name or 2-letter code, e.g. \"Tennessee\" or \"TN\"."
             },
             "day": {
               "type": "string",
@@ -45,7 +45,7 @@
               "maximum": 600
             }
           },
-          "required": ["market", "day"]
+          "required": ["state", "day"]
         }
       },
       "server": {
@@ -56,8 +56,20 @@
     {
       "type": "function",
       "function": {
+        "name": "list_services",
+        "description": "List every service with its price and duration. Call this before quoting any price to a caller, and before booking, so you can pass the correct service_id.",
+        "parameters": { "type": "object", "properties": {} }
+      },
+      "server": {
+        "url": "{{API_BASE}}/api/vapi/list_services",
+        "headers": { "X-Vapi-Secret": "{{VAPI_SECRET}}" }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "book_appointment",
-        "description": "Book an appointment at a time you have confirmed is open via list_slots. Confirm the spelling of the name and read the phone number back before calling.",
+        "description": "Book an appointment at a time you have confirmed is open via list_slots, for a service you got from list_services. Confirm the spelling of the name and read the phone number back before calling. Do NOT mention or promise a specific detailer/technician — who's assigned is decided by the shop afterward, not on the call.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -66,20 +78,42 @@
               "type": "string",
               "description": "E.164 format, e.g. +19015550142"
             },
-            "market": {
+            "state": {
               "type": "string",
-              "enum": ["memphis", "nashville", "louisville"]
+              "description": "US state name or 2-letter code."
+            },
+            "zip_code": {
+              "type": "string",
+              "description": "5-digit ZIP code."
             },
             "starts_at": {
               "type": "string",
               "description": "Appointment start, ISO 8601 with timezone, e.g. 2026-09-15T14:00:00Z"
             },
-            "duration_minutes": { "type": "integer", "minimum": 15, "maximum": 600 },
-            "vehicle": { "type": "string", "description": "Year, make and model." },
-            "address": { "type": "string", "description": "Where the vehicle will be." },
+            "service_id": {
+              "type": "string",
+              "description": "The service_id from list_services. Required — never invent one."
+            },
+            "vehicle": {
+              "type": "string",
+              "description": "Year, make and model, e.g. \"2019 Toyota Tacoma\" — required, used to price larger vehicles correctly."
+            },
+            "address": {
+              "type": "string",
+              "description": "Full street address where the vehicle will be — required, in addition to state and ZIP."
+            },
             "notes": { "type": "string" }
           },
-          "required": ["customer_name", "customer_phone", "market", "starts_at"]
+          "required": [
+            "customer_name",
+            "customer_phone",
+            "state",
+            "zip_code",
+            "starts_at",
+            "service_id",
+            "vehicle",
+            "address"
+          ]
         }
       },
       "server": {
@@ -150,5 +184,5 @@
       }
     }
   ],
-  "suggested_system_prompt": "You are the phone assistant for a mobile car detailing company serving Memphis, Nashville and Louisville. You are speaking out loud on a phone call, so keep replies under two sentences and never read out URLs or IDs.\n\nFor ANY question about pricing, services, service area, hours or policy, call the `ask` tool and use only what it returns. If it returns grounded=false, say you do not have that information and offer to have someone call back — never estimate a price.\n\nTo book: ask which market, what service, and when. Call `list_slots` and offer two or three real times. Collect the caller's name, phone number and vehicle, read the phone number back to confirm, then call `book_appointment`.\n\nTo change or cancel: call `lookup_appointments` with their phone number first, confirm which appointment they mean, then call `reschedule_appointment` or `cancel_appointment`.\n\nIf a tool returns an error message, read its meaning to the caller and offer an alternative. Never claim something is booked unless the tool returned a booking_id."
+  "suggested_system_prompt": "You are the phone assistant for ShinePro Mobile Detailing, a mobile car detailing company serving customers across the United States. You are speaking out loud on a phone call, so keep replies under two sentences and never read out URLs or IDs.\n\nFor ANY question about pricing, services, service area, hours or policy, call the `ask` tool and use only what it returns. Never estimate a price yourself.\n\nTo book, you must collect ALL of the following before calling book_appointment — none of it is optional:\n1. Full name and phone number (read the phone number back to confirm).\n2. The vehicle's year, make and model — call `list_services` early and ask about the vehicle so you can quote the correct price (SUVs, trucks, vans and minivans cost more; list_services tells you the surcharge).\n3. Which service they want — call `list_services`, read out the price for their vehicle type, and get their confirmation before booking. Pass the matching service_id, never invent one.\n4. A full street address AND the state and ZIP code — do not accept just a city or just a state, get the complete address the vehicle will be at.\n5. A confirmed open time — call `list_slots` and offer two or three real times.\n\nAfter book_appointment succeeds, read the price_cents it returns back to the caller as a dollar amount so they hear the final confirmed price. Never tell the caller which detailer or technician is coming — that is assigned by the shop afterward, not decided on the call.\n\nTo change or cancel: call `lookup_appointments` with their phone number first, confirm which appointment they mean, then call `reschedule_appointment` or `cancel_appointment`.\n\nIf a tool returns an error message, read its meaning to the caller and offer an alternative. Never claim something is booked unless the tool returned a booking_id."
 }

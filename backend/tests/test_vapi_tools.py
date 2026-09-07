@@ -6,16 +6,27 @@ def future(days: int = 2, hour: int = 11) -> str:
     return d.replace(hour=hour, minute=0, second=0, microsecond=0).isoformat()
 
 
-BOOK = {
-    "customer_name": "Ray Ortiz",
-    "customer_phone": "+15025550188",
-    "market": "louisville",
-}
+def _book_payload(service_id: str, **over):
+    base = {
+        "customer_name": "Ray Ortiz",
+        "customer_phone": "+15025550188",
+        "state": "KY",
+        "zip_code": "40202",
+        "service_id": service_id,
+        "vehicle": "2016 Honda Accord",
+        "address": "100 Main St",
+        "starts_at": future(),
+    }
+    base.update(over)
+    return base
 
 
-def test_book_then_lookup_then_cancel(client):
-    booked = client.post("/api/vapi/book_appointment", json={**BOOK, "starts_at": future()})
+def test_book_then_lookup_then_cancel(client, auth):
+    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+
+    booked = client.post("/api/vapi/book_appointment", json=_book_payload(service_id))
     assert booked.status_code == 200, booked.text
+    assert booked.json()["price_cents"] is not None
     booking_id = booked.json()["booking_id"]
 
     found = client.post("/api/vapi/lookup_appointments", json={"phone": "+15025550188"})
@@ -29,15 +40,32 @@ def test_book_then_lookup_then_cancel(client):
 
 
 def test_voice_booking_shares_admin_write_path(client, auth):
-    client.post("/api/vapi/book_appointment", json={**BOOK, "starts_at": future()})
+    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+    client.post("/api/vapi/book_appointment", json=_book_payload(service_id))
     listed = client.get("/api/bookings", headers=auth).json()
     assert len(listed) == 1
     assert listed[0]["source"] == "voice"
 
 
+def test_voice_booking_without_vehicle_is_rejected(client, auth):
+    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+    payload = _book_payload(service_id)
+    del payload["vehicle"]
+    resp = client.post("/api/vapi/book_appointment", json=payload)
+    assert resp.status_code == 422
+
+
+def test_list_services_tool_returns_pricing(client):
+    resp = client.post("/api/vapi/list_services")
+    assert resp.status_code == 200
+    services = resp.json()["services"]
+    assert len(services) > 0
+    assert "price_cents" in services[0]
+
+
 def test_list_slots_tool(client):
     resp = client.post(
-        "/api/vapi/list_slots", json={"market": "memphis", "day": future(days=6, hour=0)}
+        "/api/vapi/list_slots", json={"state": "TN", "day": future(days=6, hour=0)}
     )
     assert resp.status_code == 200
     assert resp.json()["count"] > 0
@@ -50,7 +78,8 @@ def test_llm_supplied_garbage_is_rejected(client):
         json={
             "customer_name": "",
             "customer_phone": "123",
-            "market": "atlantis",
+            "state": "atlantis",
+            "zip_code": "not-a-zip",
             "starts_at": "sometime next week",
         },
     )

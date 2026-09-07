@@ -41,12 +41,6 @@ class Base(DeclarativeBase):
     pass
 
 
-class Market(str, enum.Enum):
-    memphis = "memphis"
-    nashville = "nashville"
-    louisville = "louisville"
-
-
 class BookingStatus(str, enum.Enum):
     scheduled = "scheduled"
     done = "done"
@@ -82,7 +76,19 @@ class Service(Base):
     name: Mapped[str] = mapped_column(String(255))
     duration_minutes: Mapped[int] = mapped_column(Integer, default=90)
     price_cents: Mapped[int] = mapped_column(Integer, default=0)
+    # Extra charge for larger vehicles (SUV/truck/van/minivan) — the business rule
+    # from the pricing doc ("SUVs and trucks add $100") applied automatically.
+    large_vehicle_surcharge_cents: Mapped[int] = mapped_column(Integer, default=0)
     active: Mapped[bool] = mapped_column(default=True)
+
+
+class Detailer(Base):
+    __tablename__ = "detailers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class Booking(Base):
@@ -92,11 +98,22 @@ class Booking(Base):
     customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id"), index=True)
     service_id: Mapped[str | None] = mapped_column(ForeignKey("services.id"), nullable=True)
 
-    market: Mapped[Market] = mapped_column(Enum(Market), index=True)
+    # Nullable: a phone/admin booking always has these (schema-enforced there), but a
+    # parsed job intake may not cleanly extract a US state/ZIP from freeform text.
+    state: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)
+    zip_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
     detailer: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     vehicle: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    vehicle_category: Mapped[str | None] = mapped_column(String(20), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # What the service catalog priced this at (or a manual/parsed override), snapshotted
+    # at booking time so later catalog price changes don't rewrite past jobs.
+    price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Free-text service description for jobs that don't map to a catalog Service
+    # (e.g. parsed from "interior exterior" with no matching service_id).
+    service_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -104,7 +121,7 @@ class Booking(Base):
         Enum(BookingStatus), default=BookingStatus.scheduled, index=True
     )
 
-    source: Mapped[str] = mapped_column(String(32), default="voice")  # voice | admin
+    source: Mapped[str] = mapped_column(String(32), default="voice")  # voice | admin | parser
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
