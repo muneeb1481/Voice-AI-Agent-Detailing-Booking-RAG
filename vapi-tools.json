@@ -1,0 +1,154 @@
+{
+  "_comment": "Vapi tool definitions. Replace {{API_BASE}} with your Render URL and {{VAPI_SECRET}} with the value set in the backend env. Schemas mirror backend/app/schemas.py — the backend re-validates everything regardless.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "ask",
+        "description": "Answer a caller question about pricing, services, service area, or policy. ALWAYS use this instead of answering from your own knowledge. If it returns grounded=false, tell the caller you do not have that information and offer a callback.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "The caller's question, in their own words."
+            }
+          },
+          "required": ["question"]
+        }
+      },
+      "server": {
+        "url": "{{API_BASE}}/api/vapi/ask",
+        "headers": { "X-Vapi-Secret": "{{VAPI_SECRET}}" }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_slots",
+        "description": "List open appointment times for a market on a given day. Call this before offering the caller any time.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "market": {
+              "type": "string",
+              "enum": ["memphis", "nashville", "louisville"]
+            },
+            "day": {
+              "type": "string",
+              "description": "The day to check, ISO 8601, e.g. 2026-09-15T00:00:00Z"
+            },
+            "duration_minutes": {
+              "type": "integer",
+              "description": "How long the service takes. Default 90.",
+              "minimum": 15,
+              "maximum": 600
+            }
+          },
+          "required": ["market", "day"]
+        }
+      },
+      "server": {
+        "url": "{{API_BASE}}/api/vapi/list_slots",
+        "headers": { "X-Vapi-Secret": "{{VAPI_SECRET}}" }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "book_appointment",
+        "description": "Book an appointment at a time you have confirmed is open via list_slots. Confirm the spelling of the name and read the phone number back before calling.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "customer_name": { "type": "string" },
+            "customer_phone": {
+              "type": "string",
+              "description": "E.164 format, e.g. +19015550142"
+            },
+            "market": {
+              "type": "string",
+              "enum": ["memphis", "nashville", "louisville"]
+            },
+            "starts_at": {
+              "type": "string",
+              "description": "Appointment start, ISO 8601 with timezone, e.g. 2026-09-15T14:00:00Z"
+            },
+            "duration_minutes": { "type": "integer", "minimum": 15, "maximum": 600 },
+            "vehicle": { "type": "string", "description": "Year, make and model." },
+            "address": { "type": "string", "description": "Where the vehicle will be." },
+            "notes": { "type": "string" }
+          },
+          "required": ["customer_name", "customer_phone", "market", "starts_at"]
+        }
+      },
+      "server": {
+        "url": "{{API_BASE}}/api/vapi/book_appointment",
+        "headers": { "X-Vapi-Secret": "{{VAPI_SECRET}}" }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "lookup_appointments",
+        "description": "Find a caller's active appointments by phone number. Use this before rescheduling or cancelling so you have the booking_id.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "phone": { "type": "string", "description": "E.164 format." }
+          },
+          "required": ["phone"]
+        }
+      },
+      "server": {
+        "url": "{{API_BASE}}/api/vapi/lookup_appointments",
+        "headers": { "X-Vapi-Secret": "{{VAPI_SECRET}}" }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "reschedule_appointment",
+        "description": "Move an existing appointment to a new time you have confirmed is open.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "booking_id": {
+              "type": "string",
+              "description": "From lookup_appointments. Never guess this."
+            },
+            "starts_at": { "type": "string", "description": "New start, ISO 8601." },
+            "duration_minutes": { "type": "integer", "minimum": 15, "maximum": 600 }
+          },
+          "required": ["booking_id", "starts_at"]
+        }
+      },
+      "server": {
+        "url": "{{API_BASE}}/api/vapi/reschedule_appointment",
+        "headers": { "X-Vapi-Secret": "{{VAPI_SECRET}}" }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "cancel_appointment",
+        "description": "Cancel an existing appointment. Confirm with the caller before calling this.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "booking_id": {
+              "type": "string",
+              "description": "From lookup_appointments. Never guess this."
+            }
+          },
+          "required": ["booking_id"]
+        }
+      },
+      "server": {
+        "url": "{{API_BASE}}/api/vapi/cancel_appointment",
+        "headers": { "X-Vapi-Secret": "{{VAPI_SECRET}}" }
+      }
+    }
+  ],
+  "suggested_system_prompt": "You are the phone assistant for a mobile car detailing company serving Memphis, Nashville and Louisville. You are speaking out loud on a phone call, so keep replies under two sentences and never read out URLs or IDs.\n\nFor ANY question about pricing, services, service area, hours or policy, call the `ask` tool and use only what it returns. If it returns grounded=false, say you do not have that information and offer to have someone call back — never estimate a price.\n\nTo book: ask which market, what service, and when. Call `list_slots` and offer two or three real times. Collect the caller's name, phone number and vehicle, read the phone number back to confirm, then call `book_appointment`.\n\nTo change or cancel: call `lookup_appointments` with their phone number first, confirm which appointment they mean, then call `reschedule_appointment` or `cancel_appointment`.\n\nIf a tool returns an error message, read its meaning to the caller and offer an alternative. Never claim something is booked unless the tool returned a booking_id."
+}

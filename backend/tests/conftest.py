@@ -1,0 +1,45 @@
+import os
+import tempfile
+from pathlib import Path
+
+os.environ["DATABASE_URL"] = (
+    f"sqlite+pysqlite:///{Path(tempfile.gettempdir()) / 'detailing_test.db'}"
+)
+os.environ["ADMIN_EMAIL"] = "admin@test.com"
+os.environ["ADMIN_PASSWORD"] = "testpass123"
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["VAPI_SECRET"] = ""
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.db import SessionLocal, engine  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import Base  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def clean_db():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    from app.seed import seed
+
+    with SessionLocal() as db:
+        seed(db)
+    yield
+    Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+def client():
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture
+def auth(client):
+    resp = client.post(
+        "/api/auth/login", json={"email": "admin@test.com", "password": "testpass123"}
+    )
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}

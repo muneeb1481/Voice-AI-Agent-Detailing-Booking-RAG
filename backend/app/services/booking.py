@@ -1,0 +1,202 @@
+"""One source of truth for booking writes.
+
+The Vapi tools and the admin API both call these functions — never a second write path.
+"""
+from __future__ import annotations
+
+from datetime import datetime, time, timedelta, timezone
+
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models import Booking, BookingStatus, Customer, Market, Service
+from app.schemas import BookingCreate, SlotOut
+
+BUSINESS_OPEN = time(8, 0)
+BUSINESS_CLOSE = time(18, 0)
+SLOT_STEP_MINUTES = 30
+MAX_DAYS_AHEAD = 60
+
+
+def _as_utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def _bad_request(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def get_or_create_customer(
+    db: Session, name: str, phone: str, email: str | None = None
+) -> Customer:
+    customer = db.execute(select(Customer).where(Customer.phone == phone)).scalar_one_or_none()
+    if customer:
+        if name and customer.name != name:
+            customer.name = name
+        if email and not customer.email:
+            customer.email = email
+        return customer
+    customer = Customer(name=name, phone=phone, email=email)
+    db.add(customer)
+    db.flush()
+    return customer
+
+
+def _overlaps(db: Session, market: Market, start: datetime, end: datetime, exclude_id: str | None = None):
+    stmt = (
+        select(Booking)
+        .where(Booking.market == market)
+        .where(Booking.status.in_([BookingStatus.scheduled, BookingStatus.rescheduled]))
+        .where(Booking.starts_at < end)
+        .where(Booking.ends_at > start)
+    )
+    if exclude_id:
+        stmt = stmt.where(Booking.id != exclude_id)
+    return db.execute(stmt).scalars().all()
+
+
+def validate_window(start: datetime, end: datetime) -> None:
+    now = datetime.now(timezone.utc)
+    if start <= now:
+        raise _bad_request("That time is in the past. Pick an upcoming time.")
+    if start > now + timedelta(days=MAX_DAYS_AHEAD):
+        raise _bad_request(f"We only book up to {MAX_DAYS_AHEAD} days ahead.")
+    if not (BUSINESS_OPEN <= start.time() < BUSINESS_CLOSE):
+        raise _bad_request("That is outside business hours (8:00-18:00).")
+    if end.time() > BUSINESS_CLOSE and end.date() == start.date():
+        raise _bad_request("That appointment would run past closing time.")
+
+
+def list_slots(
+    db: Session,
+    market: Market,
+    day: datetime,
+    duration_minutes: int = 90,
+) -> list[SlotOut]:
+    day_start = _as_utc(datetime.combine(day.date(), BUSINESS_OPEN))
+    day_end = _as_utc(datetime.combine(day.date(), BUSINESS_CLOSE))
+    now = datetime.now(timezone.utc)
+
+    booked = _overlaps(db, market, day_start, day_end)
+    slots: list[SlotOut] = []
+
+    cursor = day_start
+    step = timedelta(minutes=SLOT_STEP_MINUTES)
+    duration = timedelta(minutes=duration_minutes)
+
+    while cursor + duration <= day_end:
+        end = cursor + duration
+        clash = any(
+            _as_utc(b.starts_at) < end and _as_utc(b.ends_at) > cursor for b in booked
+        )
+        if not clash and cursor > now:
+            slots.append(SlotOut(starts_at=cursor, ends_at=end))
+        cursor += step
+    return slots
+
+
+def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -> Booking:
+    start = _as_utc(payload.starts_at)
+
+    duration = payload.duration_minutes
+    service = None
+    if payload.service_id:
+        service = db.get(Service, payload.service_id)
+        if service is None:
+            raise _bad_request("Unknown service.")
+        duration = service.duration_minutes
+
+    end = start + timedelta(minutes=duration)
+    validate_window(start, end)
+
+    if _overlaps(db, payload.market, start, end):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That slot is already taken. Offer the caller another time.",
+        )
+
+    customer = get_or_create_customer(
+        db, payload.customer_name, payload.customer_phone, payload.customer_email
+    )
+    booking = Booking(
+        customer_id=customer.id,
+        service_id=service.id if service else None,
+        market=payload.market,
+        detailer=payload.detailer,
+        vehicle=payload.vehicle,
+        address=payload.address,
+        notes=payload.notes,
+        starts_at=start,
+        ends_at=end,
+        status=BookingStatus.scheduled,
+        source=source,
+    )
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def reschedule_booking(
+    db: Session, booking_id: str, new_start: datetime, duration_minutes: int | None = None
+) -> Booking:
+    booking = _require(db, booking_id)
+    if booking.status == BookingStatus.cancelled:
+        raise _bad_request("That appointment is cancelled and cannot be rescheduled.")
+
+    start = _as_utc(new_start)
+    minutes = duration_minutes or int(
+        (booking.ends_at - booking.starts_at).total_seconds() // 60
+    )
+    end = start + timedelta(minutes=minutes)
+    validate_window(start, end)
+
+    if _overlaps(db, booking.market, start, end, exclude_id=booking.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="That slot is already taken."
+        )
+
+    booking.starts_at = start
+    booking.ends_at = end
+    booking.status = BookingStatus.rescheduled
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def cancel_booking(db: Session, booking_id: str) -> Booking:
+    booking = _require(db, booking_id)
+    booking.status = BookingStatus.cancelled
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def set_status(db: Session, booking_id: str, new_status: BookingStatus) -> Booking:
+    booking = _require(db, booking_id)
+    booking.status = new_status
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def find_by_phone(db: Session, phone: str) -> list[Booking]:
+    return list(
+        db.execute(
+            select(Booking)
+            .join(Customer)
+            .where(Customer.phone == phone)
+            .where(Booking.status.in_([BookingStatus.scheduled, BookingStatus.rescheduled]))
+            .order_by(Booking.starts_at)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _require(db: Session, booking_id: str) -> Booking:
+    booking = db.get(Booking, booking_id)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    return booking
