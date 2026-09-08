@@ -120,3 +120,45 @@ def test_call_transcripts_listed_for_admin(client, auth):
 
 def test_call_transcripts_require_admin(client):
     assert client.get("/api/call-transcripts").status_code == 401
+
+
+def test_classify_vehicle_tool_recognizes_car(client):
+    resp = client.post("/api/vapi/classify_vehicle", json={"vehicle": "Toyota Corolla"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["category"] == "sedan"
+    assert body["supported"] is True
+
+
+def test_classify_vehicle_tool_flags_motorcycle(client):
+    resp = client.post("/api/vapi/classify_vehicle", json={"vehicle": "Kawasaki Ninja H2R"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["category"] == "motorcycle"
+    assert body["supported"] is False
+    assert "not something we detail" in body["note"]
+
+
+def test_booking_a_motorcycle_is_rejected(client, auth):
+    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    starts = (datetime.now(ZoneInfo("America/New_York")) + timedelta(days=2)).replace(
+        hour=10, minute=0, second=0, microsecond=0
+    )
+    resp = client.post(
+        "/api/vapi/book_appointment",
+        json={
+            "customer_name": "Biker Joe",
+            "customer_phone": "+16465550111",
+            "state": "NY",
+            "zip_code": "10001",
+            "starts_at": starts.isoformat(),
+            "service_id": service_id,
+            "vehicle": "Harley-Davidson Sportster",
+            "address": "5 Main St",
+        },
+    )
+    assert resp.status_code == 400
+    assert "motorcycle" in resp.json()["detail"].lower()

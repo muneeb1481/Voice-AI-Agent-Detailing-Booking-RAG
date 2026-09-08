@@ -247,6 +247,15 @@ class CurrentTimeResponse(BaseModel):
     closing_line: str
 
 
+# --- Vehicle eligibility check (before committing to a full booking flow) ---
+class ClassifyVehicleResponse(BaseModel):
+    vehicle: str
+    category: str | None
+    supported: bool
+    large_vehicle_surcharge_applies: bool
+    note: str
+
+
 # --- Dashboard ---
 class DashboardStats(BaseModel):
     bookings_today: int

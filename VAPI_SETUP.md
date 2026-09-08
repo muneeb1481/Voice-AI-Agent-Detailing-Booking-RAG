@@ -29,7 +29,7 @@ IMMEDIATELY when the call connects, before or while you greet the caller and ask
 If `lookup_appointments` finds an existing appointment: skip the full intake below. Let them know you found their booking (day/time is enough, no need to read the ID) and ask directly: would they like to reschedule it, cancel it, or book an additional appointment? Handle whichever they choose using the matching tools.
 
 If nothing is found (new customer, or no active booking), collect the following IN THIS ORDER before calling book_appointment — none of it is optional, but the order matters:
-1. What service they want and their vehicle's year, make and model. Call `list_services` early, read out the price for their vehicle type (SUVs, trucks, vans and minivans cost more — list_services tells you the surcharge), and get their confirmation. Pass the matching service_id, never invent one.
+1. Their vehicle's year, make and model FIRST, then immediately call `classify_vehicle` with it. If supported is false, apologize — we only detail cars, SUVs, trucks and vans, not motorcycles — and do not continue the booking flow; offer to help with anything else or end the call politely. If supported, continue: ask what service they want, call `list_services`, read out the price for their vehicle type (SUVs, trucks, vans and minivans cost more — list_services and classify_vehicle both tell you when the surcharge applies), and get their confirmation. Pass the matching service_id, never invent one.
 2. A confirmed open appointment time — call `list_slots` and offer two or three real times.
 3. Their full street address, and the state and ZIP code — do not accept just a city or just a state, get the complete address the vehicle will be at. Ask this AFTER the service and time are settled, not before.
 4. Their name and phone number LAST, right before finalizing. Your caller's number is already known to you as {{customer.number}} — don't ask "what's your phone number" as if you have no idea. Instead confirm it: read {{customer.number}} back to them and ask if that's the best number to use, since caller ID can be wrong, blocked, or a shared line. Only ask them to state a number fresh if they say {{customer.number}} isn't right or they're calling on someone else's behalf.
@@ -51,7 +51,7 @@ If a tool returns an error message, read its meaning to the caller and offer an 
 
 ## Tools
 
-Create all 8 of these as Custom Tools (Functions) in Vapi and attach every
+Create all 9 of these as Custom Tools (Functions) in Vapi and attach every
 one to the Assistant. Every tool uses the same two settings for **Server URL** and
 **Headers** — only the path at the end of the URL and the parameters differ.
 
@@ -100,7 +100,28 @@ one to the Assistant. Every tool uses the same two settings for **Server URL** a
 
 ---
 
-### Tool 3: `list_services`
+### Tool 3: `classify_vehicle`
+
+**Description**
+> Check whether a vehicle is one we service, right after the caller tells you what it is — before going any further into booking. Motorcycles are not something we detail; this catches that early instead of failing at the final booking step.
+
+**Server URL**
+```
+{{API_BASE}}/api/vapi/classify_vehicle
+```
+
+**Headers**
+- `X-Vapi-Secret`: `{{VAPI_SECRET}}`
+
+**Parameters**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `vehicle` | string | Yes | Year, make and model, exactly as the caller said it. |
+
+---
+
+### Tool 4: `list_services`
 
 **Description**
 > List every service with its price and duration. Call this before quoting any price to a caller, and before booking, so you can pass the correct service_id.
@@ -117,7 +138,7 @@ one to the Assistant. Every tool uses the same two settings for **Server URL** a
 
 ---
 
-### Tool 4: `current_time`
+### Tool 5: `current_time`
 
 **Description**
 > Get the real current local time and a ready-made closing line for the caller's state. Call this right before ending any call (after a booking, reschedule, or cancellation) so your sign-off matches their actual local time of day — never guess what time of day it is yourself.
@@ -138,7 +159,7 @@ one to the Assistant. Every tool uses the same two settings for **Server URL** a
 
 ---
 
-### Tool 5: `book_appointment`
+### Tool 6: `book_appointment`
 
 **Description**
 > Book an appointment at a time you have confirmed is open via list_slots, for a service you got from list_services. Confirm the spelling of the name and read the phone number back before calling. Do NOT mention or promise a specific detailer/technician — who's assigned is decided by the shop afterward, not on the call.
@@ -167,7 +188,7 @@ one to the Assistant. Every tool uses the same two settings for **Server URL** a
 
 ---
 
-### Tool 6: `lookup_appointments`
+### Tool 7: `lookup_appointments`
 
 **Description**
 > Find a caller's active appointments by phone number. Use this before rescheduling or cancelling so you have the booking_id.
@@ -188,7 +209,7 @@ one to the Assistant. Every tool uses the same two settings for **Server URL** a
 
 ---
 
-### Tool 7: `reschedule_appointment`
+### Tool 8: `reschedule_appointment`
 
 **Description**
 > Move an existing appointment to a new time you have confirmed is open.
@@ -211,7 +232,7 @@ one to the Assistant. Every tool uses the same two settings for **Server URL** a
 
 ---
 
-### Tool 8: `cancel_appointment`
+### Tool 9: `cancel_appointment`
 
 **Description**
 > Cancel an existing appointment. First ask why they're cancelling — if they give a reason, pass it. If they don't want to say, that's fine, just cancel without a reason. Confirm with the caller before calling this.
@@ -251,13 +272,14 @@ Saved calls show up in the admin dashboard under **Calls**.
 
 ## Quick checklist
 
-- [ ] All 8 tools created with the correct Server URL (real Render URL substituted)
+- [ ] All 9 tools created with the correct Server URL (real Render URL substituted)
 - [ ] Every tool has the `X-Vapi-Secret` header set to the real value
-- [ ] All 8 tools attached to the Assistant
+- [ ] All 9 tools attached to the Assistant
 - [ ] End-of-call webhook (Server URL) configured with the same header
 - [ ] System Prompt pasted in full
 - [ ] Test call: ask a pricing question, ask "what's today's date", try booking an appointment
 - [ ] Test call: confirm the agent reads back your caller ID number instead of asking blindly
 - [ ] Test call: book, then call again — confirm it recognizes the existing appointment and offers reschedule/cancel/book another
 - [ ] Test call: cancel an appointment — confirm it asks why, and does NOT say "we'll call or text before arrival"
+- [ ] Test call: mention a motorcycle (e.g. "Kawasaki Ninja") as your vehicle — confirm the agent politely declines instead of trying to book it
 - [ ] After a test call, check the **Calls** page in the dashboard for the saved transcript

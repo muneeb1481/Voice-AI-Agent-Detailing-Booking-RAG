@@ -29,3 +29,17 @@ def test_is_large_vehicle():
     assert is_large_vehicle("suv") is True
     assert is_large_vehicle("sedan") is False
     assert is_large_vehicle(None) is False
+
+
+def test_motorcycle_detected():
+    assert classify_vehicle("Kawasaki Ninja H2R") == "motorcycle"
+    assert classify_vehicle("Harley-Davidson Sportster") == "motorcycle"
+    assert classify_vehicle("Ducati Panigale") == "motorcycle"
+
+
+def test_motorcycle_is_unsupported():
+    from app.services.vehicle import is_unsupported_vehicle
+
+    assert is_unsupported_vehicle("motorcycle") is True
+    assert is_unsupported_vehicle("sedan") is False
+    assert is_unsupported_vehicle(None) is False

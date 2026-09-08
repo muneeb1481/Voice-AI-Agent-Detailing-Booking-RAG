@@ -16,7 +16,13 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import get_db
 from app.models import CallLog, CallTranscript, Service
-from app.schemas import AskRequest, AskResponse, CurrentTimeResponse, VoiceBookingCreate
+from app.schemas import (
+    AskRequest,
+    AskResponse,
+    ClassifyVehicleResponse,
+    CurrentTimeResponse,
+    VoiceBookingCreate,
+)
 from app.security import bearer_scheme
 from app.services import booking as booking_service
 from app.services.timezones import period_and_closing_line
@@ -106,6 +112,52 @@ def list_services(db: Session = Depends(get_db)) -> dict:
             for s in services
         ]
     }
+
+
+class ClassifyVehicleArgs(BaseModel):
+    vehicle: str = Field(min_length=1, description="Year, make and model, as the caller said it.")
+
+
+@router.post(
+    "/classify_vehicle",
+    response_model=ClassifyVehicleResponse,
+    dependencies=[Depends(verify_vapi)],
+)
+def classify_vehicle_endpoint(args: ClassifyVehicleArgs) -> ClassifyVehicleResponse:
+    """Check a vehicle BEFORE going through the rest of booking — so an unsupported
+    vehicle (currently: motorcycles) gets caught in conversation, not as a failure
+    at the final book_appointment step."""
+    from app.services.vehicle import (  # noqa: PLC0415
+        classify_vehicle_smart,
+        is_large_vehicle,
+        is_unsupported_vehicle,
+    )
+
+    category = classify_vehicle_smart(args.vehicle)
+    supported = not is_unsupported_vehicle(category)
+
+    if not supported:
+        note = (
+            "This vehicle is not something we detail. Apologize and let the caller "
+            "know we only service cars, SUVs, trucks, and vans — do not proceed with "
+            "list_services or book_appointment for this vehicle."
+        )
+    elif category is None:
+        note = (
+            "Could not confidently determine the vehicle's body type. Proceed as normal "
+            "(list_services still gives the base price); the large-vehicle surcharge "
+            "just won't apply unless you learn more about the vehicle."
+        )
+    else:
+        note = f"Recognized as a {category}. Proceed with list_services and booking as normal."
+
+    return ClassifyVehicleResponse(
+        vehicle=args.vehicle,
+        category=category,
+        supported=supported,
+        large_vehicle_surcharge_applies=is_large_vehicle(category),
+        note=note,
+    )
 
 
 @router.post("/book_appointment", dependencies=[Depends(verify_vapi)])

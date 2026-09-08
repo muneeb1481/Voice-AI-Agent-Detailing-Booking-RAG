@@ -18,7 +18,15 @@ settings = get_settings()
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 LARGE_CATEGORIES = {"suv", "truck", "van", "minivan"}
-_ALL_CATEGORIES = {"sedan", "suv", "truck", "hatchback", "coupe", "van", "minivan"}
+
+# Categories the classifier can return but the business doesn't detail — surfaced so
+# the caller hears "sorry, we don't service that" instead of the booking silently
+# going through priced (or worse, mispriced) as a car.
+UNSUPPORTED_CATEGORIES = {"motorcycle"}
+
+_ALL_CATEGORIES = {
+    "sedan", "suv", "truck", "hatchback", "coupe", "van", "minivan", "motorcycle",
+}
 
 # Longer/more specific keys first within a category so "pickup truck" doesn't get
 # swallowed by a shorter unrelated match; order across categories doesn't matter
@@ -47,6 +55,13 @@ _KEYWORDS: dict[str, list[str]] = {
         "mazda3 hatch", "impreza hatchback", "leaf", "bolt",
     ],
     "coupe": ["coupe", "mustang", "camaro", "challenger", "brz", "gt86", "86 "],
+    "motorcycle": [
+        "motorcycle", "motorbike", "moped", "scooter", "dirt bike", "dirtbike",
+        "harley", "harley-davidson", "ninja", "kawasaki", "ducati", "triumph",
+        "ktm", "aprilia", "vespa", "yamaha r1", "yamaha r6", "yamaha mt",
+        "suzuki gsx", "gsxr", "bmw motorrad", "indian scout", "indian chief",
+        "sportster", "fat boy", "road king",
+    ],
     "sedan": [
         "sedan", "corolla", "camry", "civic", "accord", "altima", "sentra", "maxima",
         "jetta", "passat", "elantra", "sonata", "impala", "malibu", "fusion",
@@ -112,3 +127,7 @@ def _classify_with_llm(text: str) -> str | None:
 
 def is_large_vehicle(category: str | None) -> bool:
     return category in LARGE_CATEGORIES
+
+
+def is_unsupported_vehicle(category: str | None) -> bool:
+    return category in UNSUPPORTED_CATEGORIES

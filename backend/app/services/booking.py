@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.models import Booking, BookingStatus, Customer, Service
 from app.schemas import BookingCreate, ParsedBookingCreate, SlotOut
 from app.services.timezones import timezone_for_state
-from app.services.vehicle import classify_vehicle_smart, is_large_vehicle
+from app.services.vehicle import classify_vehicle_smart, is_large_vehicle, is_unsupported_vehicle
 
 BUSINESS_OPEN = time(8, 0)
 BUSINESS_CLOSE = time(18, 0)
@@ -148,6 +148,11 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
         )
 
     category, price_cents = _price_for(service, payload.vehicle, payload.price_cents)
+    if is_unsupported_vehicle(category):
+        raise _bad_request(
+            "We're sorry, we don't currently offer detailing for motorcycles — only "
+            "cars, SUVs, trucks, and vans. Offer to help with anything else, or end the call politely."
+        )
 
     customer = get_or_create_customer(
         db, payload.customer_name, payload.customer_phone, payload.customer_email
