@@ -107,6 +107,7 @@ class Booking(Base):
     vehicle_category: Mapped[str | None] = mapped_column(String(20), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # What the service catalog priced this at (or a manual/parsed override), snapshotted
     # at booking time so later catalog price changes don't rewrite past jobs.
@@ -172,4 +173,25 @@ class CallLog(Base):
     question: Mapped[str | None] = mapped_column(Text, nullable=True)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class CallTranscript(Base):
+    """One row per completed voice call, from Vapi's end-of-call webhook — so an
+    admin can see exactly what the agent said, not just infer it from the booking
+    that resulted (or didn't)."""
+
+    __tablename__ = "call_transcripts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    call_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    customer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ended_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The full webhook body, kept as-is — Vapi's exact payload shape can shift, and
+    # this guarantees nothing is lost even when a specific field wasn't parsed out.
+    raw_payload = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

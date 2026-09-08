@@ -4,6 +4,7 @@ import { Shell } from '@/components/Shell'
 import { Login } from '@/pages/Login'
 import { Dashboard } from '@/pages/Dashboard'
 import { Bookings } from '@/pages/Bookings'
+import { Calls } from '@/pages/Calls'
 import { Documents } from '@/pages/Documents'
 import { Playground } from '@/pages/Playground'
 import { useAuth } from '@/context/AuthContext'
@@ -26,6 +27,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/bookings" element={<Bookings />} />
+        <Route path="/calls" element={<Calls />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/playground" element={<Playground />} />
         <Route path="*" element={<Navigate to="/" replace />} />

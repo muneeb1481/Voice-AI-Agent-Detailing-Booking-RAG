@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import SessionLocal, init_db
-from app.routers import auth, bookings, detailers, documents, vapi
+from app.routers import auth, bookings, call_transcripts, detailers, documents, vapi
 from app.seed import seed
 
 settings = get_settings()
@@ -38,6 +38,7 @@ app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(bookings.router)
 app.include_router(detailers.router)
+app.include_router(call_transcripts.router)
 app.include_router(vapi.router)
 
 

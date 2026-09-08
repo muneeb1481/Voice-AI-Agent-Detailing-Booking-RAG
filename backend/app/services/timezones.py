@@ -40,3 +40,19 @@ def timezone_for_state(state: str | None) -> ZoneInfo:
 
 def local_now(state: str | None = None) -> datetime:
     return datetime.now(timezone_for_state(state))
+
+
+# Two buckets, not four — morning and afternoon both close with "have a nice day";
+# evening and night both close with the other line. Deterministic (real clock, not
+# an LLM guessing what time it "feels like"); the cutoff hours are the only thing
+# to tune if the wording or timing ever needs adjusting.
+DAY_START_HOUR = 5
+NIGHT_START_HOUR = 17
+
+
+def period_and_closing_line(state: str | None = None) -> tuple[str, str, datetime]:
+    now = local_now(state)
+    is_day = DAY_START_HOUR <= now.hour < NIGHT_START_HOUR
+    if is_day:
+        return "day", "Have a nice day!", now
+    return "night", "Have a great evening!", now

@@ -8,6 +8,7 @@ import {
   Menu,
   MessageSquareText,
   Moon,
+  PhoneCall,
   Sparkles,
   Sun,
   X,
@@ -20,6 +21,7 @@ import { cn } from '@/lib/utils'
 const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/bookings', label: 'Bookings', icon: CalendarDays },
+  { to: '/calls', label: 'Calls', icon: PhoneCall },
   { to: '/documents', label: 'Knowledge', icon: FileText },
   { to: '/playground', label: 'Agent test', icon: MessageSquareText },
 ]

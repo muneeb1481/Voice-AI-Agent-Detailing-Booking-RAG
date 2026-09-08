@@ -245,9 +245,11 @@ def reschedule_booking(
     return booking
 
 
-def cancel_booking(db: Session, booking_id: str) -> Booking:
+def cancel_booking(db: Session, booking_id: str, reason: str | None = None) -> Booking:
     booking = _require(db, booking_id)
     booking.status = BookingStatus.cancelled
+    if reason:
+        booking.cancellation_reason = reason
     db.commit()
     db.refresh(booking)
     return booking

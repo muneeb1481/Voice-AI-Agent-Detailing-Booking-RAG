@@ -79,6 +79,8 @@ export const api = {
   deleteDetailer: (id: string) =>
     request<void>(`/api/detailers/${id}`, { method: 'DELETE' }),
 
+  callTranscripts: () => request<import('./types').CallTranscript[]>('/api/call-transcripts'),
+
   bookings: (params: Record<string, string | undefined>) => {
     const q = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v) as [string, string][],

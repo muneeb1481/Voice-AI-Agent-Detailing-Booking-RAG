@@ -20,6 +20,7 @@ export interface Booking {
   vehicle_category: string | null
   address: string | null
   notes: string | null
+  cancellation_reason: string | null
   price_cents: number | null
   service_label: string | null
   starts_at: string
@@ -82,6 +83,18 @@ export interface ParsedJob {
   price_cents: number | null
   starts_at: string | null
   notes: string | null
+}
+
+export interface CallTranscript {
+  id: string
+  call_id: string | null
+  phone: string | null
+  customer_name: string | null
+  transcript: string | null
+  summary: string | null
+  ended_reason: string | null
+  duration_seconds: number | null
+  created_at: string
 }
 
 export interface AskResponse {

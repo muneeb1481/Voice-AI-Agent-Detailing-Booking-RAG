@@ -346,6 +346,12 @@ function BookingDetail({
         </p>
       )}
 
+      {b.status === 'cancelled' && b.cancellation_reason && (
+        <p className="mt-3 rounded-lg bg-[rgb(var(--danger)/0.1)] px-3 py-2 text-xs text-[rgb(var(--danger))]">
+          <span className="font-medium">Cancellation reason:</span> {b.cancellation_reason}
+        </p>
+      )}
+
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <div className="w-48">
           <Label htmlFor={`detailer-${b.id}`}>Detailer</Label>

@@ -123,6 +123,7 @@ class BookingOut(ORMModel):
     vehicle_category: str | None
     address: str | None
     notes: str | None
+    cancellation_reason: str | None
     price_cents: int | None
     service_label: str | None
     starts_at: datetime
@@ -222,6 +223,28 @@ class ParsedJob(BaseModel):
     price_cents: int | None = None
     starts_at: datetime | None = None
     notes: str | None = None
+
+
+# --- Call transcripts (Vapi end-of-call webhook) ---
+class CallTranscriptOut(ORMModel):
+    id: str
+    call_id: str | None
+    phone: str | None
+    customer_name: str | None
+    transcript: str | None
+    summary: str | None
+    ended_reason: str | None
+    duration_seconds: int | None
+    created_at: datetime
+
+
+# --- Current local time (deterministic, for the agent's closing line) ---
+class CurrentTimeResponse(BaseModel):
+    state: str | None
+    local_time: str  # e.g. "2026-09-08T14:32:00-04:00"
+    hour: int
+    period: str  # "day" | "night"
+    closing_line: str
 
 
 # --- Dashboard ---

@@ -6,7 +6,7 @@ supplies trust.
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
@@ -15,10 +15,11 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import CallLog, Service
-from app.schemas import AskRequest, AskResponse, VoiceBookingCreate
+from app.models import CallLog, CallTranscript, Service
+from app.schemas import AskRequest, AskResponse, CurrentTimeResponse, VoiceBookingCreate
 from app.security import bearer_scheme
 from app.services import booking as booking_service
+from app.services.timezones import period_and_closing_line
 from app.services.us_states import normalize_state
 from app.services import rag
 
@@ -121,6 +122,37 @@ def book_appointment(args: VoiceBookingCreate, db: Session = Depends(get_db)) ->
     }
 
 
+class CurrentTimeArgs(BaseModel):
+    state: str | None = None
+
+    @field_validator("state")
+    @classmethod
+    def _validate_state(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        try:
+            return normalize_state(v)
+        except ValueError:
+            return None
+
+
+@router.post(
+    "/current_time", response_model=CurrentTimeResponse, dependencies=[Depends(verify_vapi)]
+)
+def current_time(args: CurrentTimeArgs) -> CurrentTimeResponse:
+    """Deterministic — the real clock, not the model guessing what time it is.
+    Call right before ending a call, so the sign-off matches the caller's actual
+    local time of day."""
+    period, closing_line, now = period_and_closing_line(args.state)
+    return CurrentTimeResponse(
+        state=args.state,
+        local_time=now.isoformat(),
+        hour=now.hour,
+        period=period,
+        closing_line=closing_line,
+    )
+
+
 class LookupArgs(BaseModel):
     phone: str = Field(min_length=7, max_length=32)
 
@@ -158,9 +190,55 @@ def reschedule_appointment(args: RescheduleArgs, db: Session = Depends(get_db)) 
 
 class CancelArgs(BaseModel):
     booking_id: str
+    reason: str | None = Field(
+        default=None,
+        description="Why the caller is cancelling, in their own words, if they gave one.",
+    )
 
 
 @router.post("/cancel_appointment", dependencies=[Depends(verify_vapi)])
 def cancel_appointment(args: CancelArgs, db: Session = Depends(get_db)) -> dict:
-    booking = booking_service.cancel_booking(db, args.booking_id)
+    booking = booking_service.cancel_booking(db, args.booking_id, args.reason)
     return {"booking_id": booking.id, "status": booking.status.value}
+
+
+@router.post("/call-ended", dependencies=[Depends(verify_vapi)])
+async def call_ended(request: Request, db: Session = Depends(get_db)) -> dict:
+    """Vapi's end-of-call webhook. Configure this as the Assistant's Server URL
+    (with the same X-Vapi-Secret header) so every finished call is saved here for
+    an admin to review — not just what got booked, but how the conversation went.
+
+    Payload shape isn't hard-relied on: best-effort field extraction, but the full
+    raw body is always stored, so nothing is lost even if a field path is off.
+    """
+    body = await request.json()
+    message = body.get("message", body)  # some Vapi setups nest under "message", some don't
+
+    call = message.get("call", {}) or {}
+    customer = message.get("customer", {}) or call.get("customer", {}) or {}
+    analysis = message.get("analysis", {}) or {}
+
+    transcript = message.get("transcript")
+    if not transcript:
+        messages = message.get("artifact", {}).get("messages") or message.get("messages") or []
+        if messages:
+            transcript = "\n".join(
+                f"{m.get('role', '?')}: {m.get('message', m.get('content', ''))}"
+                for m in messages
+                if isinstance(m, dict)
+            )
+
+    db.add(
+        CallTranscript(
+            call_id=call.get("id") or message.get("callId"),
+            phone=customer.get("number"),
+            customer_name=customer.get("name"),
+            transcript=transcript,
+            summary=analysis.get("summary") or message.get("summary"),
+            ended_reason=call.get("endedReason") or message.get("endedReason"),
+            duration_seconds=message.get("durationSeconds"),
+            raw_payload=body,
+        )
+    )
+    db.commit()
+    return {"ok": True}
