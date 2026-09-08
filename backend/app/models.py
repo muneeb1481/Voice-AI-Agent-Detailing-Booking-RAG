@@ -125,6 +125,10 @@ class AddOn(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=30)
     price_cents: Mapped[int] = mapped_column(Integer, default=0)
     large_vehicle_surcharge_cents: Mapped[int] = mapped_column(Integer, default=0)
+    # The floor this add-on can be discounted down to when a customer insists on a
+    # lower price. Null = no stated floor (same discount handling as a service with
+    # no min_price_cents — nothing stops it beyond the normal $0 lower bound).
+    min_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     active: Mapped[bool] = mapped_column(default=True)
 
 

@@ -151,20 +151,25 @@ def _resolve_extras(
     addon_ids: list[str],
     category: str | None,
     length_ft: float | None,
-) -> tuple[list[BookingItem], int, int]:
+) -> tuple[list[BookingItem], int, int, int]:
     """Extra full services and add-ons stacked on top of a booking's base service —
     each snapshotted (name/price/duration) at booking time, same reasoning as the
     base service's own price snapshot: a later catalog price change shouldn't
-    silently rewrite what a past job actually cost."""
+    silently rewrite what a past job actually cost.
+
+    Also sums every line item's own price floor (base service's is added by the
+    caller) so a discount on the whole package can never be clamped past what's
+    actually needed to protect each individually-floored item."""
     items: list[BookingItem] = []
     total_price = 0
     total_duration = 0
+    total_floor = 0
 
     for sid in extra_service_ids:
         svc = db.get(Service, sid)
         if svc is None:
             raise _bad_request("One of the extra services doesn't exist.")
-        price, _min = _service_price(db, svc, category, length_ft)
+        price, min_price = _service_price(db, svc, category, length_ft)
         items.append(
             BookingItem(
                 item_type="service",
@@ -176,6 +181,7 @@ def _resolve_extras(
         )
         total_price += price
         total_duration += svc.duration_minutes
+        total_floor += min_price or 0
 
     for aid in addon_ids:
         addon = db.get(AddOn, aid)
@@ -195,8 +201,9 @@ def _resolve_extras(
         )
         total_price += price
         total_duration += addon.duration_minutes
+        total_floor += addon.min_price_cents or 0
 
-    return items, total_price, total_duration
+    return items, total_price, total_duration, total_floor
 
 
 def _apply_discount(
@@ -228,7 +235,7 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
         duration = service.duration_minutes
         base_price, floor_cents = _service_price(db, service, category, payload.vehicle_length_ft)
 
-    items, extras_price, extras_duration = _resolve_extras(
+    items, extras_price, extras_duration, extras_floor = _resolve_extras(
         db, payload.extra_service_ids, payload.addon_ids, category, payload.vehicle_length_ft
     )
     duration += extras_duration
@@ -243,13 +250,17 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
         )
 
     subtotal = base_price + extras_price
+    # Combine every line item's own floor — a discount on the whole package can
+    # never be clamped past the point where any individually-floored item would
+    # have to go below its own stated minimum.
+    combined_floor = (floor_cents or 0) + extras_floor
     if payload.price_cents is not None:
         price_cents = payload.price_cents  # a full manual override always wins outright
         original_price_cents = subtotal if (service or items) else None
         discount_applied = 0
     elif service or items:
         price_cents, discount_applied = _apply_discount(
-            subtotal, payload.discount_cents, floor_cents
+            subtotal, payload.discount_cents, combined_floor
         )
         original_price_cents = subtotal
     else:
@@ -299,7 +310,7 @@ def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
     start = _as_utc(payload.starts_at) if payload.starts_at else datetime.now(timezone.utc)
 
     category = classify_vehicle_smart(payload.vehicle)
-    items, extras_price, extras_duration = _resolve_extras(
+    items, extras_price, extras_duration, extras_floor = _resolve_extras(
         db, payload.extra_service_ids, payload.addon_ids, category, payload.vehicle_length_ft
     )
     duration = payload.duration_minutes + extras_duration
@@ -310,7 +321,9 @@ def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
         original_price_cents = extras_price if items else None
         discount_applied = 0
     elif items:
-        price_cents, discount_applied = _apply_discount(extras_price, payload.discount_cents, None)
+        price_cents, discount_applied = _apply_discount(
+            extras_price, payload.discount_cents, extras_floor
+        )
         original_price_cents = extras_price
     else:
         price_cents = None

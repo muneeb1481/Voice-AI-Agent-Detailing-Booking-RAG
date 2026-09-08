@@ -199,6 +199,7 @@ class AddOnOut(ORMModel):
     duration_minutes: int
     price_cents: int
     large_vehicle_surcharge_cents: int
+    min_price_cents: int | None
     active: bool
 
 

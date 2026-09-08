@@ -79,13 +79,15 @@ CERAMIC_TIERS = [
 CERAMIC_ELIGIBLE = ["sedan", "suv", "truck"]
 CERAMIC_DURATION = 150
 
-# name, duration_minutes, price_cents — flat, no per-category variance in the guide
+# name, duration_minutes, price_cents, min_price_cents | None — flat, no per-category
+# variance in the guide. Waxing Only has a stated floor ($50) it can be discounted
+# down to when a customer insists; the rest have no stated floor.
 DEFAULT_ADDONS = [
-    ("Pet Hair Removal", 45, 7000),
-    ("Waxing Only", 30, 7000),
-    ("Headlight Restoration", 45, 10000),
-    ("Headliner Cleaning", 45, 5000),
-    ("Engine Bay Cleaning", 30, 7000),
+    ("Pet Hair Removal", 45, 7000, None),
+    ("Waxing Only", 30, 7000, 5000),
+    ("Headlight Restoration", 45, 10000, None),
+    ("Headliner Cleaning", 45, 5000, None),
+    ("Engine Bay Cleaning", 30, 7000, None),
 ]
 
 # Motorcycle detailing is its own single-category service.
@@ -183,10 +185,19 @@ def seed(db: Session) -> None:
         elif svc.price_per_foot_cents != per_foot:
             svc.price_per_foot_cents = per_foot
 
-    for name, minutes, price in DEFAULT_ADDONS:
+    for name, minutes, price, min_price in DEFAULT_ADDONS:
         found = db.execute(select(AddOn).where(AddOn.name == name)).scalar_one_or_none()
         if found is None:
-            db.add(AddOn(name=name, duration_minutes=minutes, price_cents=price))
+            db.add(
+                AddOn(
+                    name=name,
+                    duration_minutes=minutes,
+                    price_cents=price,
+                    min_price_cents=min_price,
+                )
+            )
+        elif found.min_price_cents != min_price:
+            found.min_price_cents = min_price
 
     for name in DEFAULT_DETAILERS:
         found = db.execute(select(Detailer).where(Detailer.name == name)).scalar_one_or_none()

@@ -276,6 +276,74 @@ def test_discount_applies_partially_when_room_exists(client, auth):
     assert body["discount_cents"] == suv_price - suv_floor
 
 
+def test_waxing_only_addon_has_fifty_dollar_floor(client, auth):
+    wax = _addon(client, auth, "Waxing Only")
+    assert wax["price_cents"] == 7000
+    assert wax["min_price_cents"] == 5000
+
+
+def test_waxing_only_addon_not_discounted_by_default(client, auth):
+    """The floor only matters if a discount is requested — a customer who never
+    objects is quoted the full $70, not the insist-only $50."""
+    base = _service(client, auth, "Interior & Exterior Detailing")
+    wax = _addon(client, auth, "Waxing Only")
+
+    resp = client.post(
+        "/api/bookings",
+        json={
+            "customer_name": "No Haggle", "customer_phone": "+19015550270",
+            "state": "TN", "zip_code": "38103", "starts_at": future(days=16),
+            "service_id": base["id"], "vehicle": "Toyota Corolla",
+            "addon_ids": [wax["id"]],
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["price_cents"] == _sedan_price(base) + 7000
+
+
+def test_waxing_only_addon_discount_clamps_at_its_own_floor(client, auth):
+    """A big requested discount on a booking that's ONLY the Waxing Only add-on
+    (no base service) must still stop at the add-on's own $50 floor."""
+    wax = _addon(client, auth, "Waxing Only")
+
+    resp = client.post(
+        "/api/bookings",
+        json={
+            "customer_name": "Wax Haggler", "customer_phone": "+19015550271",
+            "state": "TN", "zip_code": "38103", "starts_at": future(days=17),
+            "vehicle": "Toyota Corolla",
+            "addon_ids": [wax["id"]],
+            "discount_cents": 5000,
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["price_cents"] == 5000  # clamped at the $50 floor, not $20
+    assert body["discount_cents"] == 2000
+    assert body["original_price_cents"] == 7000
+
+
+def test_pet_hair_addon_has_no_floor_and_can_discount_to_zero(client, auth):
+    pet_hair = _addon(client, auth, "Pet Hair Removal")
+    assert pet_hair["min_price_cents"] is None
+
+    resp = client.post(
+        "/api/bookings",
+        json={
+            "customer_name": "No Floor Haggler", "customer_phone": "+19015550272",
+            "state": "TN", "zip_code": "38103", "starts_at": future(days=18),
+            "vehicle": "Toyota Corolla",
+            "addon_ids": [pet_hair["id"]],
+            "discount_cents": 7000,
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["price_cents"] == 0
+
+
 def test_invalid_addon_id_rejected(client, auth):
     base = _service(client, auth, "Interior & Exterior Detailing")
     resp = client.post(
