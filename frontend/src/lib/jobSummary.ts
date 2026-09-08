@@ -17,6 +17,9 @@ export function jobSummaryText(b: Booking): string {
       ? `Add-ons: ${b.items.map((i) => `${i.name} (${formatMoney(i.price_cents)})`).join(', ')}`
       : null,
     `Price: ${b.price_cents != null ? formatMoney(b.price_cents) : 'Not set'}`,
+    b.discount_cents > 0
+      ? `Discount: ${formatMoney(b.discount_cents)} off (was ${formatMoney(b.original_price_cents ?? 0)})`
+      : null,
     `Detailer: ${b.detailer ?? 'Unassigned'}`,
     `Date: ${formatDate(b.starts_at)} at ${formatTime(b.starts_at)}`,
     `Status: ${b.status}`,

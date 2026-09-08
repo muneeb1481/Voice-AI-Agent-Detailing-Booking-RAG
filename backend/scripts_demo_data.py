@@ -13,31 +13,59 @@ from app.services.chunking import chunk_text
 from app.services.rag import ingest_document
 
 PRICING_DOC = """
-SHINEPRO DETAILING - SERVICES AND PRICING
+SHINEPRO DETAILING - SERVICES AND PRICING GUIDE
 
-Express Wash and Wax - 79 dollars, about 60 minutes. Exterior hand wash, spray wax,
-tire dressing, windows.
+Prices vary by vehicle type. Exact prices and floor prices are looked up from the
+service catalog when booking (via list_services/list_addons) - this document is
+for general questions, not the source of exact numbers to quote.
 
-Full Interior Detail - 189 dollars, about 2 hours 30 minutes. Full vacuum, steam clean
-of carpets and upholstery, leather conditioning, interior glass, air vents.
+INTERIOR & EXTERIOR DETAILING - about 2 hours.
+Foam wash, wheel and tire cleaning, door jamb and trunk seal cleaning, microfiber
+dry outside; full vacuum, dashboard and door panel wipe-down, trim dressing,
+interior glass, air freshener inside.
+Sedan 200 dollars, SUV 220, Truck 220, Coupe 200, Van 400, Mini Van 300.
 
-Interior and Exterior Full Detail - 299 dollars, about 4 hours. Everything in the
-express wash plus the full interior detail, plus clay bar decontamination.
+INTERIOR DETAILING ONLY - about 90 minutes, same interior work as above without
+the exterior wash. Has a minimum price it will never be discounted below: Sedan
+150 (floor 150), SUV 180 (floor 170), Truck 170 (floor 170), Coupe 160 (floor 160),
+Van 250 (floor 250), Mini Van 200 (floor 200).
 
-Ceramic Coating - 799 dollars, about 6 hours. Paint correction, panel prep, and a
-professional grade ceramic coating with a 3 year warranty. SUVs and trucks add 100 dollars.
+BUFFING & WAXING - premium wax protection, 2-3 months durability, about 2.5 hours
+combined with a base service (3-5 hours total per the original guide). Sedan 200,
+SUV 200, Truck 200, Coupe 200, Van 300, Mini Van 200.
+WAXING ONLY (no buffing, an add-on) - 70 dollars flat, any vehicle.
 
-Headlight Restoration - 99 dollars, about 45 minutes. Both headlights sanded, polished
-and UV sealed.
+PAINT CORRECTION - removes swirl marks and scratches, 5-8 hours depending on level.
+Level 1 (minor swirls): 400 dollars most vehicles, 500 for Vans.
+Level 2 (moderate scratches, multi-stage polish): 1000 dollars, any vehicle.
+Level 3 (deep scratches, 3-stage correction, showroom finish): 1500 dollars, any vehicle.
+
+CERAMIC COATING - only available for Sedan, SUV, and Truck. Nano-ceramic layer,
+UV/water/dirt protection, 2-3 hours application.
+2 Year (Standard) 400 dollars. 3 Year (Enhanced) 800 dollars. 5 Year (Premium) 1200 dollars.
+
+MOTORCYCLE FULL DETAILING - 170 dollars.
+
+BOAT DETAILING - 35 dollars per foot of boat length.
+TRAILER DETAILING - 35 dollars per foot of trailer length.
+
+ADD-ONS (flat price, any vehicle):
+Pet Hair Removal 70 dollars - specialized extraction, deep vacuum, odor neutralizing.
+Headlight Restoration 100 dollars - oxidation removal, polishing, UV protective coating.
+Headliner Cleaning 50 dollars - ceiling interior cleaning and spot treatment.
+Engine Bay Cleaning 70 dollars - degreasing and detailing, engine must be cool first.
 
 SERVICE AREA
-We are fully mobile and serve customers across the United States. There is no travel fee
-within 20 miles of your city center. Beyond 20 miles we add 1 dollar per mile.
+We are fully mobile and serve customers across the United States.
 
 HOURS AND POLICY
-We book appointments from 8am to 6pm, seven days a week. We need access to the vehicle
-and a parking space. We bring our own water and power. Cancellations inside 24 hours
-are charged a 25 dollar fee. We do not do paintless dent repair or windshield replacement.
+We book appointments from 8am to 6pm, local time to the customer, seven days a week.
+We need access to the vehicle and a parking space. We bring our own water and power.
+
+DISCOUNTS
+If a customer says the price is too expensive, we can knock 10 dollars off the total
+package price (never per individual service) and can repeat that if they still object,
+down to the service's minimum price where one exists - never below it.
 """
 
 CUSTOMERS = [

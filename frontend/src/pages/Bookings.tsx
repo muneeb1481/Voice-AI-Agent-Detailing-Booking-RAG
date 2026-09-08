@@ -331,11 +331,24 @@ function BookingDetail({
   return (
     <div className="border-t border-token bg-[rgb(var(--bg-subtle))] px-5 py-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <DetailField label="Vehicle" value={b.vehicle ?? '—'} sub={b.vehicle_category ?? undefined} />
+        <DetailField
+          label="Vehicle"
+          value={b.vehicle ?? '—'}
+          sub={
+            b.vehicle_length_ft
+              ? `${b.vehicle_category ?? ''} · ${b.vehicle_length_ft} ft`.trim()
+              : (b.vehicle_category ?? undefined)
+          }
+        />
         <DetailField label="Service" value={b.service_label ?? '—'} />
         <DetailField
           label="Price"
           value={b.price_cents != null ? formatMoney(b.price_cents) : 'Not set'}
+          sub={
+            b.discount_cents > 0
+              ? `${formatMoney(b.original_price_cents ?? 0)} − ${formatMoney(b.discount_cents)} discount`
+              : undefined
+          }
         />
         <DetailField label="Address" value={b.address ?? '—'} sub={b.zip_code ?? undefined} />
       </div>

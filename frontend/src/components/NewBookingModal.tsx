@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input, Label, Select, Textarea } from '@/components/ui/Field'
@@ -24,6 +24,8 @@ const EMPTY = {
   time: '10:00',
   service_id: '',
   duration_minutes: 90,
+  vehicle_length_ft: '',
+  discount_dollars: '',
   detailer: '',
   vehicle: '',
   address: '',
@@ -58,11 +60,7 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
   }
 
   const selectedService = services.find((s) => s.id === form.service_id)
-  const selectedAddons = addons.filter((a) => selectedAddonIds.includes(a.id))
-  const estimatedTotal = useMemo(() => {
-    if (!selectedService && selectedAddons.length === 0) return null
-    return (selectedService?.price_cents ?? 0) + selectedAddons.reduce((sum, a) => sum + a.price_cents, 0)
-  }, [selectedService, selectedAddons])
+  const isLengthBased = selectedService?.price_per_foot_cents != null
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -79,6 +77,8 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
         service_id: form.service_id || null,
         duration_minutes: Number(form.duration_minutes),
         addon_ids: selectedAddonIds,
+        vehicle_length_ft: form.vehicle_length_ft ? Number(form.vehicle_length_ft) : null,
+        discount_cents: form.discount_dollars ? Math.round(Number(form.discount_dollars) * 100) : null,
         detailer: form.detailer || null,
         vehicle: form.vehicle || null,
         address: form.address || null,
@@ -191,10 +191,13 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
               <option value="">Custom / not specified</option>
               {services.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} — {formatMoney(s.price_cents)}
+                  {s.name}
                 </option>
               ))}
             </Select>
+            <p className="mt-1 text-[11px] text-muted">
+              Price depends on vehicle type — computed automatically when saved.
+            </p>
           </div>
           <div>
             <Label htmlFor="dur">Duration (minutes)</Label>
@@ -215,6 +218,25 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
             )}
           </div>
         </div>
+
+        {isLengthBased && (
+          <div>
+            <Label htmlFor="length">Vehicle length (feet)</Label>
+            <Input
+              id="length"
+              type="number"
+              min={1}
+              step={1}
+              required
+              placeholder="30"
+              value={form.vehicle_length_ft}
+              onChange={(e) => set('vehicle_length_ft', e.target.value)}
+            />
+            <p className="mt-1 text-[11px] text-muted">
+              {selectedService?.name} is priced per foot — required to compute the price.
+            </p>
+          </div>
+        )}
 
         {addons.length > 0 && (
           <div>
@@ -237,13 +259,6 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
               ))}
             </div>
           </div>
-        )}
-
-        {estimatedTotal != null && (
-          <p className="rounded-lg bg-[rgb(var(--accent)/0.1)] px-3 py-2 text-xs">
-            <span className="font-medium">Estimated total:</span> {formatMoney(estimatedTotal)}
-            <span className="text-muted"> (base surcharge for larger vehicles applied on save)</span>
-          </p>
         )}
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -269,13 +284,30 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
           </div>
         </div>
 
-        <div>
-          <Label htmlFor="addr">Service address</Label>
-          <Input
-            id="addr"
-            value={form.address}
-            onChange={(e) => set('address', e.target.value)}
-          />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="addr">Service address</Label>
+            <Input
+              id="addr"
+              value={form.address}
+              onChange={(e) => set('address', e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="discount">Discount ($)</Label>
+            <Input
+              id="discount"
+              type="number"
+              min={0}
+              step={1}
+              placeholder="0"
+              value={form.discount_dollars}
+              onChange={(e) => set('discount_dollars', e.target.value)}
+            />
+            <p className="mt-1 text-[11px] text-muted">
+              Clamped server-side to the service's price floor.
+            </p>
+          </div>
         </div>
 
         <div>

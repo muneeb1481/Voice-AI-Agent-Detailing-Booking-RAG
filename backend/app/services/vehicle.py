@@ -3,8 +3,7 @@
 Keyword match first: it's free, instant, and a vehicle body type is a closed,
 well-known vocabulary, so a lookup covers the vast majority of real input. Only
 when that comes back empty (an unlisted or unusual model) does this fall back to
-one Groq call rather than silently leaving the category — and therefore the
-large-vehicle surcharge — unset.
+one Groq call rather than silently leaving the category unset.
 """
 import json
 import re
@@ -17,16 +16,21 @@ settings = get_settings()
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-LARGE_CATEGORIES = {"suv", "truck", "van", "minivan"}
+# Categories priced per-vehicle in the standard catalog matrix.
+STANDARD_CATEGORIES = {"sedan", "suv", "truck", "coupe", "van", "minivan"}
 
-# Categories the classifier can return but the business doesn't detail — surfaced so
-# the caller hears "sorry, we don't service that" instead of the booking silently
-# going through priced (or worse, mispriced) as a car.
-UNSUPPORTED_CATEGORIES = {"motorcycle"}
+# Priced separately (their own flat service, e.g. "Motorcycle Full Detailing").
+SPECIAL_CATEGORIES = {"motorcycle"}
 
-_ALL_CATEGORIES = {
-    "sedan", "suv", "truck", "hatchback", "coupe", "van", "minivan", "motorcycle",
-}
+# Priced per-foot, not per-vehicle — needs a length, not a catalog lookup.
+LENGTH_BASED_CATEGORIES = {"boat", "trailer"}
+
+# No longer used to block a booking outright — every category above is now
+# supported one way or another. Kept as a mechanism for a genuinely unserviceable
+# category in the future (nothing currently populates it).
+UNSUPPORTED_CATEGORIES: set[str] = set()
+
+_ALL_CATEGORIES = STANDARD_CATEGORIES | SPECIAL_CATEGORIES | LENGTH_BASED_CATEGORIES | {"hatchback"}
 
 # Longer/more specific keys first within a category so "pickup truck" doesn't get
 # swallowed by a shorter unrelated match; order across categories doesn't matter
@@ -62,6 +66,11 @@ _KEYWORDS: dict[str, list[str]] = {
         "suzuki gsx", "gsxr", "bmw motorrad", "indian scout", "indian chief",
         "sportster", "fat boy", "road king",
     ],
+    "boat": [
+        "boat", "yacht", "pontoon", "speedboat", "sailboat", "jet boat",
+        "fishing boat", "bass boat", "bowrider", "center console",
+    ],
+    "trailer": ["trailer", "rv trailer", "utility trailer", "boat trailer", "camper trailer"],
     "sedan": [
         "sedan", "corolla", "camry", "civic", "accord", "altima", "sentra", "maxima",
         "jetta", "passat", "elantra", "sonata", "impala", "malibu", "fusion",
@@ -126,8 +135,14 @@ def _classify_with_llm(text: str) -> str | None:
 
 
 def is_large_vehicle(category: str | None) -> bool:
-    return category in LARGE_CATEGORIES
+    """Legacy helper, unused by the new per-category price matrix — kept only so
+    nothing importing it breaks; prefer looking up ServicePrice by category directly."""
+    return category in {"suv", "truck", "van", "minivan"}
 
 
 def is_unsupported_vehicle(category: str | None) -> bool:
     return category in UNSUPPORTED_CATEGORIES
+
+
+def is_length_based(category: str | None) -> bool:
+    return category in LENGTH_BASED_CATEGORIES

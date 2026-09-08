@@ -95,7 +95,10 @@ def list_slots(args: ListSlotsArgs, db: Session = Depends(get_db)) -> dict:
 
 @router.post("/list_services", dependencies=[Depends(verify_vapi)])
 def list_services(db: Session = Depends(get_db)) -> dict:
-    """So the agent can quote a real price before booking — never estimate one."""
+    """So the agent can quote a real price before booking — never estimate one.
+    Prices genuinely differ by vehicle type: each service lists its price PER
+    CATEGORY (a missing category means that service isn't offered for that
+    vehicle at all), or a per-foot rate for boat/trailer services."""
     services = db.execute(
         select(Service).where(Service.active).order_by(Service.name)
     ).scalars().all()
@@ -105,9 +108,21 @@ def list_services(db: Session = Depends(get_db)) -> dict:
                 "service_id": s.id,
                 "name": s.name,
                 "duration_minutes": s.duration_minutes,
-                "price_cents": s.price_cents,
-                "large_vehicle_surcharge_cents": s.large_vehicle_surcharge_cents,
-                "note": "large_vehicle_surcharge_cents applies for SUVs, trucks, vans, and minivans",
+                "price_per_foot_cents": s.price_per_foot_cents,
+                "prices_by_vehicle_category": (
+                    {p.category: {"price_cents": p.price_cents, "min_price_cents": p.min_price_cents} for p in s.prices}
+                    if s.prices
+                    else None
+                ),
+                "flat_price_cents": s.price_cents if not s.prices and s.price_per_foot_cents is None else None,
+                "note": (
+                    "Priced per foot — you need the vehicle's length to quote this."
+                    if s.price_per_foot_cents is not None
+                    else "Only offered for the vehicle categories listed in prices_by_vehicle_category — "
+                    "if the caller's category isn't a key here, this service isn't available for them."
+                    if s.prices
+                    else "Same price for every vehicle."
+                ),
             }
             for s in services
         ]
@@ -117,8 +132,9 @@ def list_services(db: Session = Depends(get_db)) -> dict:
 @router.post("/list_addons", dependencies=[Depends(verify_vapi)])
 def list_addons(db: Session = Depends(get_db)) -> dict:
     """Add-ons stack on top of a base service — buffing, waxing, paint correction,
-    pet hair removal, engine bay cleaning. Call this whenever a caller asks what
-    extras are available, or wants to add something beyond the base service."""
+    pet hair removal, engine bay cleaning, headlight restoration, headliner cleaning.
+    Call this whenever a caller asks what extras are available, or wants to add
+    something beyond the base service. Prices are flat regardless of vehicle type."""
     addons = db.execute(select(AddOn).where(AddOn.active).order_by(AddOn.name)).scalars().all()
     return {
         "addons": [
@@ -127,8 +143,6 @@ def list_addons(db: Session = Depends(get_db)) -> dict:
                 "name": a.name,
                 "duration_minutes": a.duration_minutes,
                 "price_cents": a.price_cents,
-                "large_vehicle_surcharge_cents": a.large_vehicle_surcharge_cents,
-                "note": "large_vehicle_surcharge_cents applies for SUVs, trucks, vans, and minivans",
             }
             for a in addons
         ]
@@ -145,29 +159,36 @@ class ClassifyVehicleArgs(BaseModel):
     dependencies=[Depends(verify_vapi)],
 )
 def classify_vehicle_endpoint(args: ClassifyVehicleArgs) -> ClassifyVehicleResponse:
-    """Check a vehicle BEFORE going through the rest of booking — so an unsupported
-    vehicle (currently: motorcycles) gets caught in conversation, not as a failure
-    at the final book_appointment step."""
+    """Check a vehicle BEFORE going through the rest of booking — so a category
+    that needs different handling (motorcycle, boat/trailer needing a length,
+    or one nothing was recognized for) gets caught in conversation, not as a
+    failure at the final book_appointment step."""
     from app.services.vehicle import (  # noqa: PLC0415
         classify_vehicle_smart,
-        is_large_vehicle,
+        is_length_based,
         is_unsupported_vehicle,
     )
 
     category = classify_vehicle_smart(args.vehicle)
     supported = not is_unsupported_vehicle(category)
+    length_based = is_length_based(category)
 
     if not supported:
         note = (
-            "This vehicle is not something we detail. Apologize and let the caller "
-            "know we only service cars, SUVs, trucks, and vans — do not proceed with "
-            "list_services or book_appointment for this vehicle."
+            "This vehicle is not something we detail. Apologize and do not proceed "
+            "with list_services or book_appointment for this vehicle."
+        )
+    elif length_based:
+        note = (
+            f"This is a {category} — priced per foot, not by category. Ask the caller "
+            "for its length in feet and pass it as vehicle_length_ft when booking. "
+            "Call list_services to get the per-foot rate."
         )
     elif category is None:
         note = (
-            "Could not confidently determine the vehicle's body type. Proceed as normal "
-            "(list_services still gives the base price); the large-vehicle surcharge "
-            "just won't apply unless you learn more about the vehicle."
+            "Could not confidently determine the vehicle's body type. You'll need to "
+            "ask the caller directly (sedan, SUV, truck, coupe, van, or minivan) before "
+            "you can quote a price — list_services requires a known category."
         )
     else:
         note = f"Recognized as a {category}. Proceed with list_services and booking as normal."
@@ -176,7 +197,7 @@ def classify_vehicle_endpoint(args: ClassifyVehicleArgs) -> ClassifyVehicleRespo
         vehicle=args.vehicle,
         category=category,
         supported=supported,
-        large_vehicle_surcharge_applies=is_large_vehicle(category),
+        length_based=length_based,
         note=note,
     )
 
@@ -190,9 +211,15 @@ def book_appointment(args: VoiceBookingCreate, db: Session = Depends(get_db)) ->
         "state": booking.state,
         "status": booking.status.value,
         "price_cents": booking.price_cents,
+        "original_price_cents": booking.original_price_cents,
+        "discount_cents": booking.discount_cents,
         "vehicle_category": booking.vehicle_category,
         "items": [{"name": i.name, "price_cents": i.price_cents} for i in booking.items],
-        "note": "Read the price_cents total back to the caller as a dollar amount to confirm it.",
+        "note": (
+            "Read price_cents back to the caller as a dollar amount to confirm it — "
+            "that's the final total after any discount actually applied (discount_cents "
+            "may be less than what you asked for if it hit the price floor)."
+        ),
     }
 
 

@@ -15,8 +15,13 @@ def test_current_time_no_state_still_works(client):
     assert resp.status_code == 200
 
 
+def _service_id(client, auth, name="Interior & Exterior Detailing"):
+    services = client.get("/api/services", headers=auth).json()
+    return next(s["id"] for s in services if s["name"] == name)
+
+
 def test_cancel_with_reason_is_saved(client, auth):
-    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+    service_id = _service_id(client, auth)
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 
@@ -51,7 +56,7 @@ def test_cancel_with_reason_is_saved(client, auth):
 
 
 def test_cancel_without_reason_leaves_it_null(client, auth):
-    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+    service_id = _service_id(client, auth)
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 
@@ -130,17 +135,19 @@ def test_classify_vehicle_tool_recognizes_car(client):
     assert body["supported"] is True
 
 
-def test_classify_vehicle_tool_flags_motorcycle(client):
+def test_classify_vehicle_tool_recognizes_motorcycle_as_supported(client):
+    """Motorcycles are now a real bookable service, not a rejected category."""
     resp = client.post("/api/vapi/classify_vehicle", json={"vehicle": "Kawasaki Ninja H2R"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["category"] == "motorcycle"
-    assert body["supported"] is False
-    assert "not something we detail" in body["note"]
+    assert body["supported"] is True
 
 
-def test_booking_a_motorcycle_is_rejected(client, auth):
-    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+def test_booking_a_motorcycle_against_a_car_only_service_is_rejected(client, auth):
+    """A motorcycle can be booked (via Motorcycle Full Detailing), but not against
+    a car service that has no motorcycle row in its price matrix."""
+    service_id = _service_id(client, auth)  # Interior & Exterior Detailing — car only
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 

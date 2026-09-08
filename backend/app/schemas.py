@@ -63,6 +63,17 @@ class BookingCreate(BaseModel):
         default_factory=list,
         description="Add-ons (from list_addons) — buffing, waxing, paint correction, etc.",
     )
+    vehicle_length_ft: float | None = Field(
+        default=None,
+        gt=0,
+        description="Required for boat/trailer vehicles — price is length x per-foot rate.",
+    )
+    discount_cents: int | None = Field(
+        default=None,
+        ge=0,
+        description="Requested discount off the total. Clamped server-side to the service's "
+        "price floor — never trust this number outright.",
+    )
 
     @field_validator("state")
     @classmethod
@@ -99,6 +110,8 @@ class ParsedBookingCreate(BaseModel):
     duration_minutes: int = Field(default=90, ge=15, le=600)
     extra_service_ids: list[str] = Field(default_factory=list)
     addon_ids: list[str] = Field(default_factory=list)
+    vehicle_length_ft: float | None = Field(default=None, gt=0)
+    discount_cents: int | None = Field(default=None, ge=0)
 
     @field_validator("state")
     @classmethod
@@ -139,10 +152,13 @@ class BookingOut(ORMModel):
     detailer: str | None
     vehicle: str | None
     vehicle_category: str | None
+    vehicle_length_ft: float | None
     address: str | None
     notes: str | None
     cancellation_reason: str | None
     price_cents: int | None
+    original_price_cents: int | None
+    discount_cents: int
     service_label: str | None
     items: list[BookingItemOut] = []
     starts_at: datetime
@@ -159,12 +175,20 @@ class SlotOut(BaseModel):
 
 
 # --- Services ---
+class ServicePriceOut(ORMModel):
+    category: str
+    price_cents: int
+    min_price_cents: int | None
+
+
 class ServiceOut(ORMModel):
     id: str
     name: str
     duration_minutes: int
     price_cents: int
     large_vehicle_surcharge_cents: int
+    price_per_foot_cents: int | None
+    prices: list[ServicePriceOut] = []
     active: bool
 
 
@@ -281,7 +305,7 @@ class ClassifyVehicleResponse(BaseModel):
     vehicle: str
     category: str | None
     supported: bool
-    large_vehicle_surcharge_applies: bool
+    length_based: bool
     note: str
 
 

@@ -8,6 +8,7 @@ from sqlalchemy import (
     JSON,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -75,11 +76,41 @@ class Service(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255))
     duration_minutes: Mapped[int] = mapped_column(Integer, default=90)
+    # Fallback price when the vehicle's category couldn't be determined at all —
+    # real pricing for a known category comes from ServicePrice below, which is
+    # the actual source of truth (this catalog has genuinely different prices per
+    # vehicle type, not one price plus a flat surcharge).
     price_cents: Mapped[int] = mapped_column(Integer, default=0)
-    # Extra charge for larger vehicles (SUV/truck/van/minivan) — the business rule
-    # from the pricing doc ("SUVs and trucks add $100") applied automatically.
     large_vehicle_surcharge_cents: Mapped[int] = mapped_column(Integer, default=0)
+    # Per-foot rate for boat/trailer services (cents per foot) — None for every
+    # other service, where pricing comes from the category matrix instead.
+    price_per_foot_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     active: Mapped[bool] = mapped_column(default=True)
+
+    prices: Mapped[list[ServicePrice]] = relationship(
+        back_populates="service", cascade="all, delete-orphan"
+    )
+
+
+class ServicePrice(Base):
+    """The real price matrix: what a given service costs for a given vehicle
+    category. A service with no row here for a category isn't offered for that
+    vehicle at all (e.g. Ceramic Coating has no minivan row — it's Sedan/SUV/Truck
+    only) — the absence of a row IS the eligibility rule, not a separate flag."""
+
+    __tablename__ = "service_prices"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    service_id: Mapped[str] = mapped_column(
+        ForeignKey("services.id", ondelete="CASCADE"), index=True
+    )
+    category: Mapped[str] = mapped_column(String(20), index=True)
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)
+    # The floor this specific (service, category) price can be discounted down to
+    # on a call. Null = no stated floor for this line item.
+    min_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    service: Mapped[Service] = relationship(back_populates="prices")
 
 
 class AddOn(Base):
@@ -120,13 +151,20 @@ class Booking(Base):
     detailer: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     vehicle: Mapped[str | None] = mapped_column(String(255), nullable=True)
     vehicle_category: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Only set for boat/trailer bookings, where price is length_ft * rate rather
+    # than a category lookup.
+    vehicle_length_ft: Mapped[float | None] = mapped_column(Float, nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # What the service catalog priced this at (or a manual/parsed override), snapshotted
-    # at booking time so later catalog price changes don't rewrite past jobs.
+    # at booking time so later catalog price changes don't rewrite past jobs. This is
+    # the FINAL price after any discount; original_price_cents keeps the pre-discount
+    # total so an admin can see how much was actually knocked off.
     price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    original_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    discount_cents: Mapped[int] = mapped_column(Integer, default=0)
     # Free-text service description for jobs that don't map to a catalog Service
     # (e.g. parsed from "interior exterior" with no matching service_id).
     service_label: Mapped[str | None] = mapped_column(String(255), nullable=True)

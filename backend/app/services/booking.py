@@ -10,10 +10,10 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AddOn, Booking, BookingItem, BookingStatus, Customer, Service
+from app.models import AddOn, Booking, BookingItem, BookingStatus, Customer, Service, ServicePrice
 from app.schemas import BookingCreate, ParsedBookingCreate, SlotOut
 from app.services.timezones import timezone_for_state
-from app.services.vehicle import classify_vehicle_smart, is_large_vehicle, is_unsupported_vehicle
+from app.services.vehicle import classify_vehicle_smart, is_length_based
 
 BUSINESS_OPEN = time(8, 0)
 BUSINESS_CLOSE = time(18, 0)
@@ -108,27 +108,49 @@ def list_slots(
     return slots
 
 
-def _price_for(
-    service: Service | None, vehicle_text: str | None, override_cents: int | None
-) -> tuple[str | None, int | None]:
-    """Category from the vehicle text, plus the price that category implies.
+def _service_price(
+    db: Session, service: Service, category: str | None, length_ft: float | None
+) -> tuple[int, int | None]:
+    """The real price for one service given a vehicle category — from the price
+    matrix, or length x rate for boat/trailer. Raises rather than guesses when the
+    service isn't actually offered for this vehicle (no matrix row = not offered)."""
+    if service.price_per_foot_cents is not None:
+        if not length_ft:
+            raise _bad_request(
+                f"We need the length in feet to quote {service.name} — ask the caller "
+                "how long their boat/trailer is."
+            )
+        return round(length_ft * service.price_per_foot_cents), None
 
-    An explicit override (parser/manual entry) always wins — the point of letting an
-    admin override is that they know the real number better than any inference does.
-    """
-    category = classify_vehicle_smart(vehicle_text)
-    if override_cents is not None:
-        return category, override_cents
-    if service is None:
-        return category, None
-    price = service.price_cents
-    if is_large_vehicle(category):
-        price += service.large_vehicle_surcharge_cents
-    return category, price
+    if not service.prices:
+        # A simple flat-price service with no category matrix — legacy/simple case.
+        return service.price_cents, None
+
+    if category is None:
+        raise _bad_request(
+            f"We need to know the vehicle type to price {service.name} — ask the "
+            "caller what kind of vehicle it is (sedan, SUV, truck, etc.)."
+        )
+
+    row = db.execute(
+        select(ServicePrice)
+        .where(ServicePrice.service_id == service.id)
+        .where(ServicePrice.category == category)
+    ).scalar_one_or_none()
+    if row is None:
+        raise _bad_request(
+            f"{service.name} isn't offered for a {category} — offer the caller a "
+            "different service, or check if a different vehicle type applies."
+        )
+    return row.price_cents, row.min_price_cents
 
 
 def _resolve_extras(
-    db: Session, extra_service_ids: list[str], addon_ids: list[str], is_large: bool
+    db: Session,
+    extra_service_ids: list[str],
+    addon_ids: list[str],
+    category: str | None,
+    length_ft: float | None,
 ) -> tuple[list[BookingItem], int, int]:
     """Extra full services and add-ons stacked on top of a booking's base service —
     each snapshotted (name/price/duration) at booking time, same reasoning as the
@@ -142,7 +164,7 @@ def _resolve_extras(
         svc = db.get(Service, sid)
         if svc is None:
             raise _bad_request("One of the extra services doesn't exist.")
-        price = svc.price_cents + (svc.large_vehicle_surcharge_cents if is_large else 0)
+        price, _min = _service_price(db, svc, category, length_ft)
         items.append(
             BookingItem(
                 item_type="service",
@@ -159,7 +181,9 @@ def _resolve_extras(
         addon = db.get(AddOn, aid)
         if addon is None:
             raise _bad_request("One of the add-ons doesn't exist.")
-        price = addon.price_cents + (addon.large_vehicle_surcharge_cents if is_large else 0)
+        # Add-ons are flat-priced (the catalog shows no per-category variance for
+        # them) — large_vehicle_surcharge_cents only fires if one is explicitly set.
+        price = addon.price_cents
         items.append(
             BookingItem(
                 item_type="addon",
@@ -175,26 +199,37 @@ def _resolve_extras(
     return items, total_price, total_duration
 
 
+def _apply_discount(
+    subtotal: int, requested_discount: int | None, floor_cents: int | None
+) -> tuple[int, int]:
+    """Clamp the requested discount to the service's price floor — the backend
+    decides the real number, never the agent's own arithmetic. Returns
+    (final_price_cents, discount_actually_applied_cents)."""
+    if not requested_discount:
+        return subtotal, 0
+    floor = floor_cents if floor_cents is not None else 0
+    final = max(subtotal - requested_discount, floor)
+    return final, subtotal - final
+
+
 def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -> Booking:
     start = _as_utc(payload.starts_at)
 
     duration = payload.duration_minutes
     service = None
+    category = classify_vehicle_smart(payload.vehicle)
+    base_price = 0
+    floor_cents: int | None = None
+
     if payload.service_id:
         service = db.get(Service, payload.service_id)
         if service is None:
             raise _bad_request("Unknown service.")
         duration = service.duration_minutes
-
-    category, base_price = _price_for(service, payload.vehicle, None)
-    if is_unsupported_vehicle(category):
-        raise _bad_request(
-            "We're sorry, we don't currently offer detailing for motorcycles — only "
-            "cars, SUVs, trucks, and vans. Offer to help with anything else, or end the call politely."
-        )
+        base_price, floor_cents = _service_price(db, service, category, payload.vehicle_length_ft)
 
     items, extras_price, extras_duration = _resolve_extras(
-        db, payload.extra_service_ids, payload.addon_ids, is_large_vehicle(category)
+        db, payload.extra_service_ids, payload.addon_ids, category, payload.vehicle_length_ft
     )
     duration += extras_duration
 
@@ -207,12 +242,20 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
             detail="That slot is already taken. Offer the caller another time.",
         )
 
+    subtotal = base_price + extras_price
     if payload.price_cents is not None:
-        price_cents = payload.price_cents  # a full override always wins outright
-    elif base_price is not None or items:
-        price_cents = (base_price or 0) + extras_price
+        price_cents = payload.price_cents  # a full manual override always wins outright
+        original_price_cents = subtotal if (service or items) else None
+        discount_applied = 0
+    elif service or items:
+        price_cents, discount_applied = _apply_discount(
+            subtotal, payload.discount_cents, floor_cents
+        )
+        original_price_cents = subtotal
     else:
         price_cents = None
+        original_price_cents = None
+        discount_applied = 0
 
     labels = [service.name] if service else []
     labels += [i.name for i in items]
@@ -229,9 +272,12 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
         detailer=payload.detailer,
         vehicle=payload.vehicle,
         vehicle_category=category,
+        vehicle_length_ft=payload.vehicle_length_ft,
         address=payload.address,
         notes=payload.notes,
         price_cents=price_cents,
+        original_price_cents=original_price_cents,
+        discount_cents=discount_applied,
         service_label=label,
         starts_at=start,
         ends_at=end,
@@ -252,19 +298,24 @@ def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
     """
     start = _as_utc(payload.starts_at) if payload.starts_at else datetime.now(timezone.utc)
 
-    category, _ = _price_for(None, payload.vehicle, None)
+    category = classify_vehicle_smart(payload.vehicle)
     items, extras_price, extras_duration = _resolve_extras(
-        db, payload.extra_service_ids, payload.addon_ids, is_large_vehicle(category)
+        db, payload.extra_service_ids, payload.addon_ids, category, payload.vehicle_length_ft
     )
     duration = payload.duration_minutes + extras_duration
     end = start + timedelta(minutes=duration)
 
     if payload.price_cents is not None:
         price_cents = payload.price_cents
+        original_price_cents = extras_price if items else None
+        discount_applied = 0
     elif items:
-        price_cents = extras_price
+        price_cents, discount_applied = _apply_discount(extras_price, payload.discount_cents, None)
+        original_price_cents = extras_price
     else:
         price_cents = None
+        original_price_cents = None
+        discount_applied = 0
 
     label = payload.service_label or (", ".join(i.name for i in items) if items else None)
 
@@ -277,9 +328,12 @@ def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
         detailer=payload.detailer,
         vehicle=payload.vehicle,
         vehicle_category=category,
+        vehicle_length_ft=payload.vehicle_length_ft,
         address=payload.address,
         notes=payload.notes,
         price_cents=price_cents,
+        original_price_cents=original_price_cents,
+        discount_cents=discount_applied,
         service_label=label,
         starts_at=start,
         ends_at=end,

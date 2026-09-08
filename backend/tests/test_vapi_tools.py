@@ -11,6 +11,11 @@ def future(days: int = 2, hour: int = 11) -> str:
     return d.replace(hour=hour, minute=0, second=0, microsecond=0).isoformat()
 
 
+def _service_id(client, auth, name="Interior & Exterior Detailing"):
+    services = client.get("/api/services", headers=auth).json()
+    return next(s["id"] for s in services if s["name"] == name)
+
+
 def _book_payload(service_id: str, **over):
     base = {
         "customer_name": "Ray Ortiz",
@@ -27,7 +32,7 @@ def _book_payload(service_id: str, **over):
 
 
 def test_book_then_lookup_then_cancel(client, auth):
-    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+    service_id = _service_id(client, auth)
 
     booked = client.post("/api/vapi/book_appointment", json=_book_payload(service_id))
     assert booked.status_code == 200, booked.text
@@ -45,7 +50,7 @@ def test_book_then_lookup_then_cancel(client, auth):
 
 
 def test_voice_booking_shares_admin_write_path(client, auth):
-    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+    service_id = _service_id(client, auth)
     client.post("/api/vapi/book_appointment", json=_book_payload(service_id))
     listed = client.get("/api/bookings", headers=auth).json()
     assert len(listed) == 1
@@ -53,7 +58,7 @@ def test_voice_booking_shares_admin_write_path(client, auth):
 
 
 def test_voice_booking_without_vehicle_is_rejected(client, auth):
-    service_id = client.get("/api/services", headers=auth).json()[0]["id"]
+    service_id = _service_id(client, auth)
     payload = _book_payload(service_id)
     del payload["vehicle"]
     resp = client.post("/api/vapi/book_appointment", json=payload)
@@ -65,7 +70,9 @@ def test_list_services_tool_returns_pricing(client):
     assert resp.status_code == 200
     services = resp.json()["services"]
     assert len(services) > 0
-    assert "price_cents" in services[0]
+    by_name = {s["name"]: s for s in services}
+    assert by_name["Interior & Exterior Detailing"]["prices_by_vehicle_category"]["sedan"]["price_cents"] == 20000
+    assert by_name["Boat Detailing"]["price_per_foot_cents"] == 3500
 
 
 def test_list_slots_tool(client):

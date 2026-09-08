@@ -121,14 +121,20 @@ def slots(
 def list_services(
     db: Session = Depends(get_db), _: str = Depends(current_admin)
 ) -> list[Service]:
-    return list(db.execute(select(Service).order_by(Service.name)).scalars().all())
+    return list(
+        db.execute(select(Service).where(Service.active).order_by(Service.name))
+        .scalars()
+        .all()
+    )
 
 
 @router.get("/addons", response_model=list[AddOnOut])
 def list_addons(
     db: Session = Depends(get_db), _: str = Depends(current_admin)
 ) -> list[AddOn]:
-    return list(db.execute(select(AddOn).order_by(AddOn.name)).scalars().all())
+    return list(
+        db.execute(select(AddOn).where(AddOn.active).order_by(AddOn.name)).scalars().all()
+    )
 
 
 @router.get("/stats", response_model=DashboardStats)

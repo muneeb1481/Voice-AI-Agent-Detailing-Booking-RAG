@@ -26,10 +26,13 @@ export interface Booking {
   detailer: string | null
   vehicle: string | null
   vehicle_category: string | null
+  vehicle_length_ft: number | null
   address: string | null
   notes: string | null
   cancellation_reason: string | null
   price_cents: number | null
+  original_price_cents: number | null
+  discount_cents: number
   service_label: string | null
   items: BookingItem[]
   starts_at: string
@@ -49,12 +52,20 @@ export interface Document {
   created_at: string
 }
 
+export interface ServicePrice {
+  category: string
+  price_cents: number
+  min_price_cents: number | null
+}
+
 export interface Service {
   id: string
   name: string
   duration_minutes: number
   price_cents: number
   large_vehicle_surcharge_cents: number
+  price_per_foot_cents: number | null
+  prices: ServicePrice[]
   active: boolean
 }
 

@@ -154,28 +154,30 @@ def test_assign_detailer_after_booking_created(client, auth):
 
 def test_price_computed_from_service_and_vehicle_category(client, auth):
     services = client.get("/api/services", headers=auth).json()
-    ceramic = next(s for s in services if s["name"] == "Ceramic Coating")
+    combo = next(s for s in services if s["name"] == "Interior & Exterior Detailing")
+    prices = {p["category"]: p["price_cents"] for p in combo["prices"]}
 
     sedan = client.post(
         "/api/bookings",
-        json=payload(service_id=ceramic["id"], vehicle="Toyota Corolla"),
+        json=payload(service_id=combo["id"], vehicle="Toyota Corolla"),
         headers=auth,
     ).json()
-    assert sedan["price_cents"] == ceramic["price_cents"]
+    assert sedan["price_cents"] == prices["sedan"]
     assert sedan["vehicle_category"] == "sedan"
 
     truck = client.post(
         "/api/bookings",
         json=payload(
-            service_id=ceramic["id"],
+            service_id=combo["id"],
             vehicle="Ford F-150",
             customer_phone="+19015550999",
             starts_at=future(days=3),
         ),
         headers=auth,
     ).json()
-    assert truck["price_cents"] == ceramic["price_cents"] + ceramic["large_vehicle_surcharge_cents"]
+    assert truck["price_cents"] == prices["truck"]
     assert truck["vehicle_category"] == "truck"
+    assert truck["price_cents"] != sedan["price_cents"]  # genuinely different, not base+surcharge
 
 
 def test_price_override_wins_over_catalog(client, auth):

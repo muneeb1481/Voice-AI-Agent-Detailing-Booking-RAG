@@ -37,9 +37,21 @@ def test_motorcycle_detected():
     assert classify_vehicle("Ducati Panigale") == "motorcycle"
 
 
-def test_motorcycle_is_unsupported():
+def test_motorcycle_is_now_a_supported_category():
+    """Motorcycles are a real bookable service (Motorcycle Full Detailing), not a
+    rejected category — this reverses the earlier outright-block behavior."""
     from app.services.vehicle import is_unsupported_vehicle
 
-    assert is_unsupported_vehicle("motorcycle") is True
+    assert is_unsupported_vehicle("motorcycle") is False
     assert is_unsupported_vehicle("sedan") is False
     assert is_unsupported_vehicle(None) is False
+
+
+def test_boat_and_trailer_detected_as_length_based():
+    from app.services.vehicle import is_length_based
+
+    assert classify_vehicle("30 foot pontoon boat") == "boat"
+    assert classify_vehicle("utility trailer") == "trailer"
+    assert is_length_based("boat") is True
+    assert is_length_based("trailer") is True
+    assert is_length_based("sedan") is False
