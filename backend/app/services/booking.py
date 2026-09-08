@@ -10,7 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Booking, BookingStatus, Customer, Service
+from app.models import AddOn, Booking, BookingItem, BookingStatus, Customer, Service
 from app.schemas import BookingCreate, ParsedBookingCreate, SlotOut
 from app.services.timezones import timezone_for_state
 from app.services.vehicle import classify_vehicle_smart, is_large_vehicle, is_unsupported_vehicle
@@ -127,6 +127,54 @@ def _price_for(
     return category, price
 
 
+def _resolve_extras(
+    db: Session, extra_service_ids: list[str], addon_ids: list[str], is_large: bool
+) -> tuple[list[BookingItem], int, int]:
+    """Extra full services and add-ons stacked on top of a booking's base service —
+    each snapshotted (name/price/duration) at booking time, same reasoning as the
+    base service's own price snapshot: a later catalog price change shouldn't
+    silently rewrite what a past job actually cost."""
+    items: list[BookingItem] = []
+    total_price = 0
+    total_duration = 0
+
+    for sid in extra_service_ids:
+        svc = db.get(Service, sid)
+        if svc is None:
+            raise _bad_request("One of the extra services doesn't exist.")
+        price = svc.price_cents + (svc.large_vehicle_surcharge_cents if is_large else 0)
+        items.append(
+            BookingItem(
+                item_type="service",
+                catalog_id=svc.id,
+                name=svc.name,
+                price_cents=price,
+                duration_minutes=svc.duration_minutes,
+            )
+        )
+        total_price += price
+        total_duration += svc.duration_minutes
+
+    for aid in addon_ids:
+        addon = db.get(AddOn, aid)
+        if addon is None:
+            raise _bad_request("One of the add-ons doesn't exist.")
+        price = addon.price_cents + (addon.large_vehicle_surcharge_cents if is_large else 0)
+        items.append(
+            BookingItem(
+                item_type="addon",
+                catalog_id=addon.id,
+                name=addon.name,
+                price_cents=price,
+                duration_minutes=addon.duration_minutes,
+            )
+        )
+        total_price += price
+        total_duration += addon.duration_minutes
+
+    return items, total_price, total_duration
+
+
 def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -> Booking:
     start = _as_utc(payload.starts_at)
 
@@ -138,6 +186,18 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
             raise _bad_request("Unknown service.")
         duration = service.duration_minutes
 
+    category, base_price = _price_for(service, payload.vehicle, None)
+    if is_unsupported_vehicle(category):
+        raise _bad_request(
+            "We're sorry, we don't currently offer detailing for motorcycles — only "
+            "cars, SUVs, trucks, and vans. Offer to help with anything else, or end the call politely."
+        )
+
+    items, extras_price, extras_duration = _resolve_extras(
+        db, payload.extra_service_ids, payload.addon_ids, is_large_vehicle(category)
+    )
+    duration += extras_duration
+
     end = start + timedelta(minutes=duration)
     validate_window(payload.state, start, end)
 
@@ -147,12 +207,16 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
             detail="That slot is already taken. Offer the caller another time.",
         )
 
-    category, price_cents = _price_for(service, payload.vehicle, payload.price_cents)
-    if is_unsupported_vehicle(category):
-        raise _bad_request(
-            "We're sorry, we don't currently offer detailing for motorcycles — only "
-            "cars, SUVs, trucks, and vans. Offer to help with anything else, or end the call politely."
-        )
+    if payload.price_cents is not None:
+        price_cents = payload.price_cents  # a full override always wins outright
+    elif base_price is not None or items:
+        price_cents = (base_price or 0) + extras_price
+    else:
+        price_cents = None
+
+    labels = [service.name] if service else []
+    labels += [i.name for i in items]
+    label = payload.service_label or (", ".join(labels) if labels else None)
 
     customer = get_or_create_customer(
         db, payload.customer_name, payload.customer_phone, payload.customer_email
@@ -168,12 +232,13 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
         address=payload.address,
         notes=payload.notes,
         price_cents=price_cents,
-        service_label=payload.service_label or (service.name if service else None),
+        service_label=label,
         starts_at=start,
         ends_at=end,
         status=BookingStatus.scheduled,
         source=source,
     )
+    booking.items = items
     db.add(booking)
     db.commit()
     db.refresh(booking)
@@ -186,10 +251,22 @@ def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
     log what already happened (or was agreed) rather than contend for a calendar slot.
     """
     start = _as_utc(payload.starts_at) if payload.starts_at else datetime.now(timezone.utc)
-    duration = payload.duration_minutes
+
+    category, _ = _price_for(None, payload.vehicle, None)
+    items, extras_price, extras_duration = _resolve_extras(
+        db, payload.extra_service_ids, payload.addon_ids, is_large_vehicle(category)
+    )
+    duration = payload.duration_minutes + extras_duration
     end = start + timedelta(minutes=duration)
 
-    category, price_cents = _price_for(None, payload.vehicle, payload.price_cents)
+    if payload.price_cents is not None:
+        price_cents = payload.price_cents
+    elif items:
+        price_cents = extras_price
+    else:
+        price_cents = None
+
+    label = payload.service_label or (", ".join(i.name for i in items) if items else None)
 
     customer = get_or_create_customer(db, payload.customer_name, payload.customer_phone)
     booking = Booking(
@@ -203,12 +280,13 @@ def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
         address=payload.address,
         notes=payload.notes,
         price_cents=price_cents,
-        service_label=payload.service_label,
+        service_label=label,
         starts_at=start,
         ends_at=end,
         status=BookingStatus.scheduled,
         source="parser",
     )
+    booking.items = items
     db.add(booking)
     db.commit()
     db.refresh(booking)

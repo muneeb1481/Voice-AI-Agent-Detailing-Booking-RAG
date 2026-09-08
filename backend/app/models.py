@@ -82,6 +82,21 @@ class Service(Base):
     active: Mapped[bool] = mapped_column(default=True)
 
 
+class AddOn(Base):
+    """A small extra a customer can add to a base service — buffing, waxing, paint
+    correction, pet hair removal, engine bay cleaning. Priced and timed separately
+    from the base service catalog, since these aren't full detailing packages."""
+
+    __tablename__ = "add_ons"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)
+    large_vehicle_surcharge_cents: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(default=True)
+
+
 class Detailer(Base):
     __tablename__ = "detailers"
 
@@ -130,6 +145,28 @@ class Booking(Base):
 
     customer: Mapped[Customer] = relationship(back_populates="bookings")
     service: Mapped[Service | None] = relationship()
+    # Extra services/add-ons stacked on top of the base service above — e.g. a base
+    # "Interior + Exterior Full Detail" plus a "Ceramic Coating" extra service and a
+    # "Waxing" add-on, each snapshotted with its own price/duration at booking time.
+    items: Mapped[list[BookingItem]] = relationship(
+        back_populates="booking", cascade="all, delete-orphan"
+    )
+
+
+class BookingItem(Base):
+    __tablename__ = "booking_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    booking_id: Mapped[str] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), index=True
+    )
+    item_type: Mapped[str] = mapped_column(String(16))  # "service" | "addon"
+    catalog_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    name: Mapped[str] = mapped_column(String(255))
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=0)
+
+    booking: Mapped[Booking] = relationship(back_populates="items")
 
 
 class Document(Base):

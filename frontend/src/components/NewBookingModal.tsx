@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input, Label, Select, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { api } from '@/lib/api'
-import type { Detailer, Service } from '@/lib/types'
+import type { AddOn, Detailer, Service } from '@/lib/types'
 import { US_STATES } from '@/lib/usStates'
 import { formatMoney } from '@/lib/utils'
 
@@ -34,18 +34,35 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
   const { notify } = useToast()
   const [form, setForm] = useState(EMPTY)
   const [services, setServices] = useState<Service[]>([])
+  const [addons, setAddons] = useState<AddOn[]>([])
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open) {
       setForm(EMPTY)
+      setSelectedAddonIds([])
       api.services().then(setServices).catch(() => setServices([]))
+      api.addons().then(setAddons).catch(() => setAddons([]))
     }
   }, [open])
 
   function set<K extends keyof typeof EMPTY>(key: K, value: (typeof EMPTY)[K]) {
     setForm((f) => ({ ...f, [key]: value }))
   }
+
+  function toggleAddon(id: string) {
+    setSelectedAddonIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    )
+  }
+
+  const selectedService = services.find((s) => s.id === form.service_id)
+  const selectedAddons = addons.filter((a) => selectedAddonIds.includes(a.id))
+  const estimatedTotal = useMemo(() => {
+    if (!selectedService && selectedAddons.length === 0) return null
+    return (selectedService?.price_cents ?? 0) + selectedAddons.reduce((sum, a) => sum + a.price_cents, 0)
+  }, [selectedService, selectedAddons])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -61,6 +78,7 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
         starts_at: startsAt,
         service_id: form.service_id || null,
         duration_minutes: Number(form.duration_minutes),
+        addon_ids: selectedAddonIds,
         detailer: form.detailer || null,
         vehicle: form.vehicle || null,
         address: form.address || null,
@@ -197,6 +215,36 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
             )}
           </div>
         </div>
+
+        {addons.length > 0 && (
+          <div>
+            <Label>Add-ons</Label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {addons.map((a) => (
+                <label
+                  key={a.id}
+                  className="flex items-center gap-2 rounded-lg border border-token bg-[rgb(var(--bg-subtle))] px-3 py-2 text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedAddonIds.includes(a.id)}
+                    onChange={() => toggleAddon(a.id)}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="flex-1">{a.name}</span>
+                  <span className="text-muted">{formatMoney(a.price_cents)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {estimatedTotal != null && (
+          <p className="rounded-lg bg-[rgb(var(--accent)/0.1)] px-3 py-2 text-xs">
+            <span className="font-medium">Estimated total:</span> {formatMoney(estimatedTotal)}
+            <span className="text-muted"> (base surcharge for larger vehicles applied on save)</span>
+          </p>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div>

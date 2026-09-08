@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import CallLog, CallTranscript, Service
+from app.models import AddOn, CallLog, CallTranscript, Service
 from app.schemas import (
     AskRequest,
     AskResponse,
@@ -114,6 +114,27 @@ def list_services(db: Session = Depends(get_db)) -> dict:
     }
 
 
+@router.post("/list_addons", dependencies=[Depends(verify_vapi)])
+def list_addons(db: Session = Depends(get_db)) -> dict:
+    """Add-ons stack on top of a base service — buffing, waxing, paint correction,
+    pet hair removal, engine bay cleaning. Call this whenever a caller asks what
+    extras are available, or wants to add something beyond the base service."""
+    addons = db.execute(select(AddOn).where(AddOn.active).order_by(AddOn.name)).scalars().all()
+    return {
+        "addons": [
+            {
+                "addon_id": a.id,
+                "name": a.name,
+                "duration_minutes": a.duration_minutes,
+                "price_cents": a.price_cents,
+                "large_vehicle_surcharge_cents": a.large_vehicle_surcharge_cents,
+                "note": "large_vehicle_surcharge_cents applies for SUVs, trucks, vans, and minivans",
+            }
+            for a in addons
+        ]
+    }
+
+
 class ClassifyVehicleArgs(BaseModel):
     vehicle: str = Field(min_length=1, description="Year, make and model, as the caller said it.")
 
@@ -170,6 +191,7 @@ def book_appointment(args: VoiceBookingCreate, db: Session = Depends(get_db)) ->
         "status": booking.status.value,
         "price_cents": booking.price_cents,
         "vehicle_category": booking.vehicle_category,
+        "items": [{"name": i.name, "price_cents": i.price_cents} for i in booking.items],
         "note": "Read the price_cents total back to the caller as a dollar amount to confirm it.",
     }
 

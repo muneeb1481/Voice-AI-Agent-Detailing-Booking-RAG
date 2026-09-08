@@ -69,6 +69,7 @@ export const api = {
 
   stats: () => request<import('./types').Stats>('/api/stats'),
   services: () => request<import('./types').Service[]>('/api/services'),
+  addons: () => request<import('./types').AddOn[]>('/api/addons'),
 
   detailers: () => request<import('./types').Detailer[]>('/api/detailers'),
   createDetailer: (name: string) =>

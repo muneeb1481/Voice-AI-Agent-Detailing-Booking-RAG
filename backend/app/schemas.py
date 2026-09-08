@@ -55,6 +55,14 @@ class BookingCreate(BaseModel):
     notes: str | None = None
     price_cents: int | None = Field(default=None, ge=0, description="Override the catalog price")
     service_label: str | None = None
+    extra_service_ids: list[str] = Field(
+        default_factory=list,
+        description="Additional full services (from list_services) stacked on the base one.",
+    )
+    addon_ids: list[str] = Field(
+        default_factory=list,
+        description="Add-ons (from list_addons) — buffing, waxing, paint correction, etc.",
+    )
 
     @field_validator("state")
     @classmethod
@@ -89,6 +97,8 @@ class ParsedBookingCreate(BaseModel):
     price_cents: int | None = Field(default=None, ge=0)
     service_label: str | None = None
     duration_minutes: int = Field(default=90, ge=15, le=600)
+    extra_service_ids: list[str] = Field(default_factory=list)
+    addon_ids: list[str] = Field(default_factory=list)
 
     @field_validator("state")
     @classmethod
@@ -114,6 +124,14 @@ class DetailerUpdate(BaseModel):
     detailer: str | None = Field(default=None, max_length=255)
 
 
+class BookingItemOut(ORMModel):
+    id: str
+    item_type: str
+    name: str
+    price_cents: int
+    duration_minutes: int
+
+
 class BookingOut(ORMModel):
     id: str
     state: str | None
@@ -126,6 +144,7 @@ class BookingOut(ORMModel):
     cancellation_reason: str | None
     price_cents: int | None
     service_label: str | None
+    items: list[BookingItemOut] = []
     starts_at: datetime
     ends_at: datetime
     status: BookingStatus
@@ -141,6 +160,16 @@ class SlotOut(BaseModel):
 
 # --- Services ---
 class ServiceOut(ORMModel):
+    id: str
+    name: str
+    duration_minutes: int
+    price_cents: int
+    large_vehicle_surcharge_cents: int
+    active: bool
+
+
+# --- Add-ons (buffing, waxing, paint correction, etc.) ---
+class AddOnOut(ORMModel):
     id: str
     name: str
     duration_minutes: int

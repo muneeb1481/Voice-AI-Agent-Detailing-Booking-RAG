@@ -13,6 +13,9 @@ export function jobSummaryText(b: Booking): string {
     `Vehicle: ${b.vehicle ?? 'Not provided'}${b.vehicle_category ? ` (${b.vehicle_category})` : ''}`,
     `Address: ${[b.address, b.zip_code, b.state ? stateName(b.state) : null].filter(Boolean).join(', ') || 'Not provided'}`,
     `Service: ${b.service_label ?? 'Not specified'}`,
+    b.items.length > 0
+      ? `Add-ons: ${b.items.map((i) => `${i.name} (${formatMoney(i.price_cents)})`).join(', ')}`
+      : null,
     `Price: ${b.price_cents != null ? formatMoney(b.price_cents) : 'Not set'}`,
     `Detailer: ${b.detailer ?? 'Unassigned'}`,
     `Date: ${formatDate(b.starts_at)} at ${formatTime(b.starts_at)}`,

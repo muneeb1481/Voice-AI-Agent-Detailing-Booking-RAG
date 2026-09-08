@@ -11,6 +11,14 @@ export interface Customer {
 
 export type BookingSource = 'voice' | 'admin' | 'parser' | string
 
+export interface BookingItem {
+  id: string
+  item_type: 'service' | 'addon' | string
+  name: string
+  price_cents: number
+  duration_minutes: number
+}
+
 export interface Booking {
   id: string
   state: string | null
@@ -23,6 +31,7 @@ export interface Booking {
   cancellation_reason: string | null
   price_cents: number | null
   service_label: string | null
+  items: BookingItem[]
   starts_at: string
   ends_at: string
   status: BookingStatus
@@ -64,6 +73,15 @@ export interface Slot {
   starts_at: string
   ends_at: string
   detailer: string | null
+}
+
+export interface AddOn {
+  id: string
+  name: string
+  duration_minutes: number
+  price_cents: number
+  large_vehicle_surcharge_cents: number
+  active: boolean
 }
 
 export interface Detailer {

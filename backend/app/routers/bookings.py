@@ -5,8 +5,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
-from app.models import Booking, BookingStatus, Document, DocumentChunk, Service
+from app.models import AddOn, Booking, BookingStatus, Document, DocumentChunk, Service
 from app.schemas import (
+    AddOnOut,
     BookingCreate,
     BookingOut,
     BookingReschedule,
@@ -121,6 +122,13 @@ def list_services(
     db: Session = Depends(get_db), _: str = Depends(current_admin)
 ) -> list[Service]:
     return list(db.execute(select(Service).order_by(Service.name)).scalars().all())
+
+
+@router.get("/addons", response_model=list[AddOnOut])
+def list_addons(
+    db: Session = Depends(get_db), _: str = Depends(current_admin)
+) -> list[AddOn]:
+    return list(db.execute(select(AddOn).order_by(AddOn.name)).scalars().all())
 
 
 @router.get("/stats", response_model=DashboardStats)

@@ -340,6 +340,23 @@ function BookingDetail({
         <DetailField label="Address" value={b.address ?? '—'} sub={b.zip_code ?? undefined} />
       </div>
 
+      {b.items.length > 0 && (
+        <div className="mt-3 rounded-lg bg-[rgb(var(--panel))] px-3 py-2 text-xs">
+          <p className="mb-1 font-medium text-muted">Extra services / add-ons</p>
+          <ul className="space-y-0.5">
+            {b.items.map((i) => (
+              <li key={i.id} className="flex justify-between">
+                <span className="capitalize">
+                  {i.name}
+                  <span className="text-muted"> ({i.item_type})</span>
+                </span>
+                <span className="tabular-nums">{formatMoney(i.price_cents)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {b.notes && (
         <p className="mt-3 rounded-lg bg-[rgb(var(--panel))] px-3 py-2 text-xs text-muted">
           {b.notes}
