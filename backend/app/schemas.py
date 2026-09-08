@@ -193,6 +193,12 @@ class ServiceOut(ORMModel):
 
 
 # --- Add-ons (buffing, waxing, paint correction, etc.) ---
+class AddOnPriceOut(ORMModel):
+    category: str
+    price_cents: int
+    min_price_cents: int | None
+
+
 class AddOnOut(ORMModel):
     id: str
     name: str
@@ -200,6 +206,7 @@ class AddOnOut(ORMModel):
     price_cents: int
     large_vehicle_surcharge_cents: int
     min_price_cents: int | None
+    prices: list[AddOnPriceOut] = []
     active: bool
 
 

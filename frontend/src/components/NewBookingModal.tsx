@@ -254,7 +254,9 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
                     className="h-3.5 w-3.5"
                   />
                   <span className="flex-1">{a.name}</span>
-                  <span className="text-muted">{formatMoney(a.price_cents)}</span>
+                  <span className="text-muted">
+                    {a.prices.length > 0 ? 'Varies by vehicle' : formatMoney(a.price_cents)}
+                  </span>
                 </label>
               ))}
             </div>

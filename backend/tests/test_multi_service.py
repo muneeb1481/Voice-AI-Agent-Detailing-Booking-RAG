@@ -276,10 +276,31 @@ def test_discount_applies_partially_when_room_exists(client, auth):
     assert body["discount_cents"] == suv_price - suv_floor
 
 
-def test_waxing_only_addon_has_fifty_dollar_floor(client, auth):
+def test_waxing_only_addon_varies_by_vehicle_category(client, auth):
     wax = _addon(client, auth, "Waxing Only")
-    assert wax["price_cents"] == 7000
-    assert wax["min_price_cents"] == 5000
+    by_category = {p["category"]: p for p in wax["prices"]}
+    assert by_category["sedan"]["price_cents"] == 7000
+    assert by_category["suv"]["price_cents"] == 7000
+    assert by_category["truck"]["price_cents"] == 7000
+    assert by_category["van"]["price_cents"] == 10000
+    assert by_category["minivan"]["price_cents"] == 10000
+    assert all(p["min_price_cents"] == 5000 for p in by_category.values())
+
+
+def test_waxing_only_addon_prices_higher_for_van(client, auth):
+    wax = _addon(client, auth, "Waxing Only")
+
+    resp = client.post(
+        "/api/bookings",
+        json={
+            "customer_name": "Van Waxer", "customer_phone": "+19015550273",
+            "state": "TN", "zip_code": "38103", "starts_at": future(days=19),
+            "vehicle": "Mercedes Sprinter", "addon_ids": [wax["id"]],
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["price_cents"] == 10000
 
 
 def test_waxing_only_addon_not_discounted_by_default(client, auth):

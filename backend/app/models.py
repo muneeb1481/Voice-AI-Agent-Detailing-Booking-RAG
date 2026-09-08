@@ -123,13 +123,38 @@ class AddOn(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255))
     duration_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    # Fallback flat price, used only when this add-on has no rows in `prices` below
+    # (most add-ons are genuinely flat-priced — Waxing Only is the one exception,
+    # which varies by vehicle category the same way a Service does).
     price_cents: Mapped[int] = mapped_column(Integer, default=0)
     large_vehicle_surcharge_cents: Mapped[int] = mapped_column(Integer, default=0)
     # The floor this add-on can be discounted down to when a customer insists on a
-    # lower price. Null = no stated floor (same discount handling as a service with
-    # no min_price_cents — nothing stops it beyond the normal $0 lower bound).
+    # lower price. Only used when `prices` is empty — a category-priced add-on's
+    # floor comes from its own AddOnPrice row instead. Null = no stated floor.
     min_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     active: Mapped[bool] = mapped_column(default=True)
+
+    prices: Mapped[list[AddOnPrice]] = relationship(
+        back_populates="addon", cascade="all, delete-orphan"
+    )
+
+
+class AddOnPrice(Base):
+    """Per-vehicle-category pricing for an add-on that genuinely varies by vehicle
+    type (currently just Waxing Only: $70 for sedan/SUV/truck/coupe, $100 for
+    van/minivan) — same shape and reasoning as ServicePrice above."""
+
+    __tablename__ = "add_on_prices"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    addon_id: Mapped[str] = mapped_column(
+        ForeignKey("add_ons.id", ondelete="CASCADE"), index=True
+    )
+    category: Mapped[str] = mapped_column(String(20), index=True)
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)
+    min_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    addon: Mapped[AddOn] = relationship(back_populates="prices")
 
 
 class Detailer(Base):

@@ -10,7 +10,16 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AddOn, Booking, BookingItem, BookingStatus, Customer, Service, ServicePrice
+from app.models import (
+    AddOn,
+    AddOnPrice,
+    Booking,
+    BookingItem,
+    BookingStatus,
+    Customer,
+    Service,
+    ServicePrice,
+)
 from app.schemas import BookingCreate, ParsedBookingCreate, SlotOut
 from app.services.timezones import timezone_for_state
 from app.services.vehicle import classify_vehicle_smart, is_length_based
@@ -145,6 +154,34 @@ def _service_price(
     return row.price_cents, row.min_price_cents
 
 
+def _addon_price(
+    db: Session, addon: AddOn, category: str | None
+) -> tuple[int, int | None]:
+    """The real price for one add-on given a vehicle category. Most add-ons are
+    flat (no `prices` rows) and just return their scalar price/floor; a few (Waxing
+    Only) genuinely vary by vehicle type like a Service does."""
+    if not addon.prices:
+        return addon.price_cents, addon.min_price_cents
+
+    if category is None:
+        raise _bad_request(
+            f"We need to know the vehicle type to price {addon.name} — ask the "
+            "caller what kind of vehicle it is (sedan, SUV, truck, etc.)."
+        )
+
+    row = db.execute(
+        select(AddOnPrice)
+        .where(AddOnPrice.addon_id == addon.id)
+        .where(AddOnPrice.category == category)
+    ).scalar_one_or_none()
+    if row is None:
+        raise _bad_request(
+            f"{addon.name} isn't offered for a {category} — offer the caller a "
+            "different add-on, or check if a different vehicle type applies."
+        )
+    return row.price_cents, row.min_price_cents
+
+
 def _resolve_extras(
     db: Session,
     extra_service_ids: list[str],
@@ -187,9 +224,7 @@ def _resolve_extras(
         addon = db.get(AddOn, aid)
         if addon is None:
             raise _bad_request("One of the add-ons doesn't exist.")
-        # Add-ons are flat-priced (the catalog shows no per-category variance for
-        # them) — large_vehicle_surcharge_cents only fires if one is explicitly set.
-        price = addon.price_cents
+        price, min_price = _addon_price(db, addon, category)
         items.append(
             BookingItem(
                 item_type="addon",
@@ -201,7 +236,7 @@ def _resolve_extras(
         )
         total_price += price
         total_duration += addon.duration_minutes
-        total_floor += addon.min_price_cents or 0
+        total_floor += min_price or 0
 
     return items, total_price, total_duration, total_floor
 

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AddOn, AdminUser, Detailer, Service, ServicePrice
+from app.models import AddOn, AddOnPrice, AdminUser, Detailer, Service, ServicePrice
 from app.security import hash_password
 
 settings = get_settings()
@@ -80,15 +80,25 @@ CERAMIC_ELIGIBLE = ["sedan", "suv", "truck"]
 CERAMIC_DURATION = 150
 
 # name, duration_minutes, price_cents, min_price_cents | None — flat, no per-category
-# variance in the guide. Waxing Only has a stated floor ($50) it can be discounted
-# down to when a customer insists; the rest have no stated floor.
+# variance. (Waxing Only is the one add-on that DOES vary by vehicle — see
+# WAXING_ONLY_PRICES below — so it isn't listed here.)
 DEFAULT_ADDONS = [
     ("Pet Hair Removal", 45, 7000, None),
-    ("Waxing Only", 30, 7000, 5000),
     ("Headlight Restoration", 45, 10000, None),
     ("Headliner Cleaning", 45, 5000, None),
     ("Engine Bay Cleaning", 30, 7000, None),
 ]
+
+# Waxing Only: $70 for sedan/SUV/truck/coupe, $100 for van/minivan. Floor is $50
+# everywhere — only offered when a customer insists the price is too high, never
+# quoted as the default price.
+WAXING_ONLY_NAME = "Waxing Only"
+WAXING_ONLY_DURATION = 30
+WAXING_ONLY_FLOOR = 5000
+WAXING_ONLY_PRICES: dict[str, int] = {
+    "sedan": 7000, "coupe": 7000, "suv": 7000, "truck": 7000,
+    "van": 10000, "minivan": 10000,
+}
 
 # Motorcycle detailing is its own single-category service.
 MOTORCYCLE_SERVICE = ("Motorcycle Full Detailing", 90, "motorcycle", 17000)
@@ -134,6 +144,39 @@ def _set_price(db: Session, service: Service, category: str, price_cents: int, m
         db.add(
             ServicePrice(
                 service_id=service.id,
+                category=category,
+                price_cents=price_cents,
+                min_price_cents=min_price_cents,
+            )
+        )
+    else:
+        row.price_cents = price_cents
+        row.min_price_cents = min_price_cents
+
+
+def _get_or_create_addon(db: Session, name: str, duration_minutes: int) -> AddOn:
+    addon = db.execute(select(AddOn).where(AddOn.name == name)).scalar_one_or_none()
+    if addon is None:
+        addon = AddOn(name=name, duration_minutes=duration_minutes, active=True)
+        db.add(addon)
+        db.flush()
+    else:
+        addon.active = True
+    return addon
+
+
+def _set_addon_price(
+    db: Session, addon: AddOn, category: str, price_cents: int, min_price_cents: int | None
+) -> None:
+    row = db.execute(
+        select(AddOnPrice)
+        .where(AddOnPrice.addon_id == addon.id)
+        .where(AddOnPrice.category == category)
+    ).scalar_one_or_none()
+    if row is None:
+        db.add(
+            AddOnPrice(
+                addon_id=addon.id,
                 category=category,
                 price_cents=price_cents,
                 min_price_cents=min_price_cents,
@@ -198,6 +241,18 @@ def seed(db: Session) -> None:
             )
         elif found.min_price_cents != min_price:
             found.min_price_cents = min_price
+
+    # Waxing Only genuinely varies by vehicle category (unlike the flat add-ons
+    # above) — keep price_cents/min_price_cents as a sedan-equivalent fallback for
+    # any caller that reads them directly, but the per-category matrix is what
+    # actually prices a booking.
+    wax = _get_or_create_addon(db, WAXING_ONLY_NAME, WAXING_ONLY_DURATION)
+    wax.price_cents = WAXING_ONLY_PRICES["sedan"]
+    wax.min_price_cents = WAXING_ONLY_FLOOR
+    for category, price in WAXING_ONLY_PRICES.items():
+        _set_addon_price(db, wax, category, price, WAXING_ONLY_FLOOR)
+    if HATCHBACK_LIKE_SEDAN:
+        _set_addon_price(db, wax, "hatchback", WAXING_ONLY_PRICES["sedan"], WAXING_ONLY_FLOOR)
 
     for name in DEFAULT_DETAILERS:
         found = db.execute(select(Detailer).where(Detailer.name == name)).scalar_one_or_none()

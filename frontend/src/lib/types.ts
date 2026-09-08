@@ -86,12 +86,20 @@ export interface Slot {
   detailer: string | null
 }
 
+export interface AddOnPrice {
+  category: string
+  price_cents: number
+  min_price_cents: number | null
+}
+
 export interface AddOn {
   id: string
   name: string
   duration_minutes: number
   price_cents: number
   large_vehicle_surcharge_cents: number
+  min_price_cents: number | null
+  prices: AddOnPrice[]
   active: boolean
 }
 

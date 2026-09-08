@@ -32,10 +32,15 @@ Van 250 (floor 250), Mini Van 200 (floor 200).
 
 BUFFING & WAXING - premium wax protection, 2-3 months durability, about 2.5 hours
 combined with a base service (3-5 hours total per the original guide). Sedan 200,
-SUV 200, Truck 200, Coupe 200, Van 300, Mini Van 200.
-WAXING ONLY (no buffing, an add-on) - 70 dollars flat, any vehicle. Has a stated
-floor of 50 dollars - only offered if the customer insists the price is too high,
-never quoted as the default price.
+SUV 200, Truck 200, Coupe 200, Van 300, Mini Van 200. There is no standalone
+"buffing" service or add-on - buffing always includes waxing and is only sold as
+this bundled service. A customer asking for "just buffing" should be quoted this
+Buffing & Waxing price for their vehicle.
+
+WAXING ONLY (no buffing, an add-on) - varies by vehicle: 70 dollars for Sedan,
+SUV, Truck, and Coupe; 100 dollars for Van and Mini Van. Has a stated floor of 50
+dollars for every vehicle - only offered if the customer insists the price is too
+high, never quoted as the default price.
 
 PAINT CORRECTION - removes swirl marks and scratches, 5-8 hours depending on level.
 Level 1 (minor swirls): 400 dollars most vehicles, 500 for Vans.

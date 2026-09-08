@@ -131,10 +131,18 @@ def list_services(db: Session = Depends(get_db)) -> dict:
 
 @router.post("/list_addons", dependencies=[Depends(verify_vapi)])
 def list_addons(db: Session = Depends(get_db)) -> dict:
-    """Add-ons stack on top of a base service — buffing, waxing, paint correction,
-    pet hair removal, engine bay cleaning, headlight restoration, headliner cleaning.
-    Call this whenever a caller asks what extras are available, or wants to add
-    something beyond the base service. Prices are flat regardless of vehicle type."""
+    """Add-ons stack on top of a base service — waxing, paint correction, pet hair
+    removal, engine bay cleaning, headlight restoration, headliner cleaning. Call
+    this whenever a caller asks what extras are available, or wants to add something
+    beyond the base service.
+
+    NOTE on buffing: there is no standalone "buffing" add-on — buffing is only ever
+    sold bundled with waxing, as the "Buffing & Waxing" full SERVICE (from
+    list_services). If a caller asks for buffing alone, quote them the Buffing &
+    Waxing service price for their vehicle category, not a separate buffing price.
+
+    Most add-ons are flat regardless of vehicle type. Waxing Only is the one
+    exception — its price varies by category, same as a full service."""
     addons = db.execute(select(AddOn).where(AddOn.active).order_by(AddOn.name)).scalars().all()
     return {
         "addons": [
@@ -142,7 +150,17 @@ def list_addons(db: Session = Depends(get_db)) -> dict:
                 "addon_id": a.id,
                 "name": a.name,
                 "duration_minutes": a.duration_minutes,
-                "price_cents": a.price_cents,
+                "prices_by_vehicle_category": (
+                    {p.category: {"price_cents": p.price_cents, "min_price_cents": p.min_price_cents} for p in a.prices}
+                    if a.prices
+                    else None
+                ),
+                "flat_price_cents": a.price_cents if not a.prices else None,
+                "note": (
+                    "Only offered for the vehicle categories listed in prices_by_vehicle_category."
+                    if a.prices
+                    else "Same price for every vehicle."
+                ),
             }
             for a in addons
         ]
