@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from typing import Protocol
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 from app.config import get_settings
 
@@ -35,7 +38,11 @@ class HashEmbedder:
 
     def _one(self, text: str) -> list[float]:
         vec = [0.0] * self.dim
-        for token in text.lower().split():
+        # Strip punctuation before hashing — "sedan?" and "sedan" (or "buffing,"
+        # and "Buffing") must hash to the same token, otherwise a plainly-typed
+        # question scores lower than it should against markdown/prose content
+        # purely because of stray punctuation, not any real semantic mismatch.
+        for token in _TOKEN_RE.findall(text.lower()):
             digest = hashlib.sha256(token.encode()).digest()
             idx = int.from_bytes(digest[:4], "big") % self.dim
             sign = 1.0 if digest[4] % 2 == 0 else -1.0
