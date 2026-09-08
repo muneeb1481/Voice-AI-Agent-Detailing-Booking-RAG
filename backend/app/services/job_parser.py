@@ -9,8 +9,9 @@ An admin pastes something like:
     $200
 
 and this extracts name / phone / vehicle / state / zip / address / service / price.
-Uses the same Groq LLM as the RAG completion when configured; falls back to a plain
-regex/heuristic parser (no network, no key) so the feature still works offline.
+Uses the same shared LLM client as the RAG completion when configured; falls back
+to a plain regex/heuristic parser (no network, no key) so the feature still works
+offline.
 """
 from __future__ import annotations
 
@@ -18,14 +19,11 @@ import json
 import re
 from datetime import datetime, timezone
 
-import httpx
-
 from app.config import get_settings
+from app.services.llm import chat_completion
 from app.services.us_states import normalize_state
 
 settings = get_settings()
-
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 _SYSTEM_PROMPT_TEMPLATE = """You extract structured job-intake data from a short, messy note an \
 admin typed or pasted after taking a car-detailing job over the phone or in person.
@@ -50,40 +48,26 @@ Do not invent a value that is not in the text. Return raw JSON, no markdown fenc
 
 
 def parse_job_text(text: str) -> dict:
-    if settings.groq_key_list:
-        result = _parse_with_groq(text)
+    if settings.kimi_api_key or settings.groq_key_list:
+        result = _parse_with_llm(text)
         if result is not None:
             return _clean(result)
     return _clean(_parse_heuristic(text))
 
 
-def _parse_with_groq(text: str) -> dict | None:
+def _parse_with_llm(text: str) -> dict | None:
     now = datetime.now(timezone.utc).strftime("%A, %Y-%m-%d %H:%M UTC")
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT_TEMPLATE.format(now=now)},
         {"role": "user", "content": text},
     ]
-    for key in settings.groq_key_list:
-        try:
-            resp = httpx.post(
-                GROQ_URL,
-                headers={"Authorization": f"Bearer {key}"},
-                json={
-                    "model": settings.groq_model,
-                    "temperature": 0,
-                    "messages": messages,
-                    "response_format": {"type": "json_object"},
-                },
-                timeout=20,
-            )
-            if resp.status_code == 429:
-                continue
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
-            return json.loads(content)
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError):
-            continue
-    return None
+    content = chat_completion(messages, json_mode=True, timeout=20)
+    if content is None:
+        return None
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return None
 
 
 _PHONE_RE = re.compile(r"(\+?\d[\d\-\s()]{6,}\d)")

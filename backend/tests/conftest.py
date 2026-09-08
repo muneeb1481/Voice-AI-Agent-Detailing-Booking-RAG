@@ -9,9 +9,10 @@ os.environ["ADMIN_EMAIL"] = "admin@test.com"
 os.environ["ADMIN_PASSWORD"] = "testpass123"
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["VAPI_SECRET"] = ""
-# Tests must be deterministic and offline — without this, a real GROQ_API_KEYS in
-# the developer's .env would make tests silently call the live API.
+# Tests must be deterministic and offline — without this, a real GROQ_API_KEYS or
+# KIMI_API_KEY in the developer's .env would make tests silently call the live API.
 os.environ["GROQ_API_KEYS"] = ""
+os.environ["KIMI_API_KEY"] = ""
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

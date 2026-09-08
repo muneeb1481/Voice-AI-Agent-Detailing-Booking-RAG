@@ -3,18 +3,14 @@
 Keyword match first: it's free, instant, and a vehicle body type is a closed,
 well-known vocabulary, so a lookup covers the vast majority of real input. Only
 when that comes back empty (an unlisted or unusual model) does this fall back to
-one Groq call rather than silently leaving the category unset.
+one LLM call rather than silently leaving the category unset.
 """
-import json
 import re
 
-import httpx
-
 from app.config import get_settings
+from app.services.llm import chat_completion
 
 settings = get_settings()
-
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Categories priced per-vehicle in the standard catalog matrix.
 STANDARD_CATEGORIES = {"sedan", "suv", "truck", "coupe", "van", "minivan"}
@@ -101,7 +97,7 @@ def classify_vehicle(text: str | None) -> str | None:
 def classify_vehicle_smart(text: str | None) -> str | None:
     """Keyword match first; only calls the LLM when that finds nothing."""
     category = classify_vehicle(text)
-    if category is not None or not text or not settings.groq_key_list:
+    if category is not None or not text or not (settings.kimi_api_key or settings.groq_key_list):
         return category
     return _classify_with_llm(text)
 
@@ -112,26 +108,11 @@ def _classify_with_llm(text: str) -> str | None:
         f"{', '.join(sorted(_ALL_CATEGORIES))}. "
         f'Vehicle: "{text}". Reply with only the single category word, nothing else.'
     )
-    for key in settings.groq_key_list:
-        try:
-            resp = httpx.post(
-                GROQ_URL,
-                headers={"Authorization": f"Bearer {key}"},
-                json={
-                    "model": settings.groq_model,
-                    "temperature": 0,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=10,
-            )
-            if resp.status_code == 429:
-                continue
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip().lower()
-            return content if content in _ALL_CATEGORIES else None
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError):
-            continue
-    return None
+    content = chat_completion([{"role": "user", "content": prompt}], timeout=10)
+    if content is None:
+        return None
+    content = content.strip().lower()
+    return content if content in _ALL_CATEGORIES else None
 
 
 def is_large_vehicle(category: str | None) -> bool:

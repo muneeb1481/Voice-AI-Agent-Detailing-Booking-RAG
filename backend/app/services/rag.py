@@ -5,7 +5,6 @@ retrieval returned. Empty retrieval means "I don't know", never a guessed price.
 """
 from __future__ import annotations
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,11 +12,10 @@ from app.config import get_settings
 from app.models import Document, DocumentChunk
 from app.schemas import AskResponse, RetrievedChunk
 from app.services.embeddings import cosine_similarity, get_embedder
+from app.services.llm import chat_completion
 from app.services.timezones import local_now
 
 settings = get_settings()
-
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 NO_ANSWER = (
     "I don't have that in our current information. Let me take your number and have "
@@ -165,9 +163,10 @@ def answer(db: Session, question: str, top_k: int = 4, state: str | None = None)
 
 
 def _complete(messages: list[dict], fallback: str) -> str:
-    """LLM call behind one function so the provider swaps in one place."""
-    if settings.groq_key_list:
-        text = _complete_groq(messages)
+    """LLM call behind one function so the provider swaps in one place. Order:
+    Kimi (primary) -> Groq (secondary, key-rotated) -> OpenAI -> fixed fallback."""
+    if settings.kimi_api_key or settings.groq_key_list:
+        text = chat_completion(messages, temperature=0.1, timeout=20)
         if text is not None:
             return text
 
@@ -182,34 +181,3 @@ def _complete(messages: list[dict], fallback: str) -> str:
 
     # No LLM configured at all: fall back rather than fabricate.
     return fallback
-
-
-def _complete_groq(messages: list[dict]) -> str | None:
-    """Try each configured Groq key in turn; a 429 (rate limit) rotates to the next one."""
-    last_error: Exception | None = None
-    for key in settings.groq_key_list:
-        try:
-            resp = httpx.post(
-                GROQ_URL,
-                headers={"Authorization": f"Bearer {key}"},
-                json={
-                    "model": settings.groq_model,
-                    "temperature": 0.1,
-                    "messages": messages,
-                },
-                timeout=20,
-            )
-            if resp.status_code == 429:
-                continue  # this key is rate-limited, try the next one
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
-            return (content or NO_ANSWER).strip()
-        except httpx.HTTPError as exc:
-            last_error = exc
-            continue
-
-    if last_error is not None:
-        # All keys exhausted or erroring — fall through to whatever provider is next
-        # rather than surfacing a 500 to the caller mid-call.
-        return None
-    return None

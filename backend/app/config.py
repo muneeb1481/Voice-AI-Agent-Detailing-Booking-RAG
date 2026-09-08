@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
 
+    kimi_api_key: str = ""
+    kimi_model: str = "kimi-k3"
+    kimi_reasoning_effort: str = "low"
+
     groq_api_keys: str = ""
     groq_model: str = "openai/gpt-oss-120b"
 

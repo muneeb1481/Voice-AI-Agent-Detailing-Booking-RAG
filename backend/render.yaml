@@ -18,6 +18,12 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: KIMI_API_KEY
+        sync: false
+      - key: KIMI_MODEL
+        value: kimi-k3
+      - key: KIMI_REASONING_EFFORT
+        value: low
       - key: GROQ_API_KEYS
         sync: false
       - key: GROQ_MODEL
