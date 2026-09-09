@@ -3,12 +3,18 @@
 Every tool validates through app.schemas and writes through app.services.booking —
 the same code path the admin dashboard uses. The LLM supplies arguments; it never
 supplies trust.
+
+Every endpoint supports two request/response shapes — see app.services.vapi_protocol
+for why: a real Vapi call (wrapped in message.toolCallList, response wrapped in
+results) and the flat legacy shape the admin dashboard's Agent Test page and the
+test suite use (arguments at the top level, response unwrapped, real HTTP status
+codes on error).
 """
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
 from sqlalchemy import select
@@ -18,7 +24,6 @@ from app.db import get_db
 from app.models import AddOn, CallLog, CallTranscript, Service
 from app.schemas import (
     AskRequest,
-    AskResponse,
     ClassifyVehicleResponse,
     CurrentTimeResponse,
     VoiceBookingCreate,
@@ -28,6 +33,7 @@ from app.services import booking as booking_service
 from app.services.timezones import period_and_closing_line
 from app.services.us_states import normalize_state
 from app.services import rag
+from app.services.vapi_protocol import parse_tool_call, tool_response
 
 settings = get_settings()
 router = APIRouter(prefix="/api/vapi", tags=["vapi"])
@@ -63,14 +69,33 @@ def verify_vapi_or_admin(
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad tool secret")
 
 
-@router.post("/ask", response_model=AskResponse, dependencies=[Depends(verify_vapi_or_admin)])
-def ask(payload: AskRequest, db: Session = Depends(get_db)) -> AskResponse:
+def _validated(model: type[BaseModel], args_dict: dict, tool_call_id: str | None):
+    """Validate `args_dict` against `model`. On failure: a real Vapi call gets a
+    200 with the problem described in `result` (so the agent can react to it —
+    a raw 422 is invisible to the LLM); the flat/legacy shape keeps raising a
+    real HTTPException(422), exactly as FastAPI's automatic body validation did
+    before this module existed, since the admin dashboard and test suite expect that."""
+    try:
+        return model.model_validate(args_dict), None
+    except ValidationError as exc:
+        if tool_call_id is not None:
+            return None, tool_response(f"Invalid arguments: {exc}", tool_call_id)
+        # exc.errors() can carry non-JSON-serializable values (e.g. a raw ValueError
+        # in 'ctx' from a field_validator) — the string form is always safe to return.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/ask", dependencies=[Depends(verify_vapi_or_admin)])
+async def ask(request: Request, db: Session = Depends(get_db)):
+    args_dict, tool_call_id = await parse_tool_call(request)
+    payload, early = _validated(AskRequest, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
     result = rag.answer(db, payload.question, payload.top_k, payload.state)
-    db.add(
-        CallLog(question=payload.question, answer=result.answer, tool_name="ask")
-    )
+    db.add(CallLog(question=payload.question, answer=result.answer, tool_name="ask"))
     db.commit()
-    return result
+    return tool_response(result.model_dump(), tool_call_id)
 
 
 class ListSlotsArgs(BaseModel):
@@ -85,24 +110,31 @@ class ListSlotsArgs(BaseModel):
 
 
 @router.post("/list_slots", dependencies=[Depends(verify_vapi)])
-def list_slots(args: ListSlotsArgs, db: Session = Depends(get_db)) -> dict:
+async def list_slots(request: Request, db: Session = Depends(get_db)):
+    args_dict, tool_call_id = await parse_tool_call(request)
+    args, early = _validated(ListSlotsArgs, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
     slots = booking_service.list_slots(db, args.state, args.day, args.duration_minutes)
-    return {
+    result = {
         "count": len(slots),
         "slots": [s.starts_at.isoformat() for s in slots[:8]],
     }
+    return tool_response(result, tool_call_id)
 
 
 @router.post("/list_services", dependencies=[Depends(verify_vapi)])
-def list_services(db: Session = Depends(get_db)) -> dict:
+async def list_services(request: Request, db: Session = Depends(get_db)):
     """So the agent can quote a real price before booking — never estimate one.
     Prices genuinely differ by vehicle type: each service lists its price PER
     CATEGORY (a missing category means that service isn't offered for that
     vehicle at all), or a per-foot rate for boat/trailer services."""
+    _args_dict, tool_call_id = await parse_tool_call(request)
     services = db.execute(
         select(Service).where(Service.active).order_by(Service.name)
     ).scalars().all()
-    return {
+    result = {
         "services": [
             {
                 "service_id": s.id,
@@ -127,10 +159,11 @@ def list_services(db: Session = Depends(get_db)) -> dict:
             for s in services
         ]
     }
+    return tool_response(result, tool_call_id)
 
 
 @router.post("/list_addons", dependencies=[Depends(verify_vapi)])
-def list_addons(db: Session = Depends(get_db)) -> dict:
+async def list_addons(request: Request, db: Session = Depends(get_db)):
     """Add-ons stack on top of a base service — waxing, shampooing, pet hair
     removal, engine bay cleaning, headlight restoration, headliner cleaning. Call
     this whenever a caller asks what extras are available, or wants to add something
@@ -145,8 +178,9 @@ def list_addons(db: Session = Depends(get_db)) -> dict:
 
     Most add-ons are flat regardless of vehicle type. Waxing Only and Shampooing
     are the exceptions — their price varies by category, same as a full service."""
+    _args_dict, tool_call_id = await parse_tool_call(request)
     addons = db.execute(select(AddOn).where(AddOn.active).order_by(AddOn.name)).scalars().all()
-    return {
+    result = {
         "addons": [
             {
                 "addon_id": a.id,
@@ -167,18 +201,15 @@ def list_addons(db: Session = Depends(get_db)) -> dict:
             for a in addons
         ]
     }
+    return tool_response(result, tool_call_id)
 
 
 class ClassifyVehicleArgs(BaseModel):
     vehicle: str = Field(min_length=1, description="Year, make and model, as the caller said it.")
 
 
-@router.post(
-    "/classify_vehicle",
-    response_model=ClassifyVehicleResponse,
-    dependencies=[Depends(verify_vapi)],
-)
-def classify_vehicle_endpoint(args: ClassifyVehicleArgs) -> ClassifyVehicleResponse:
+@router.post("/classify_vehicle", dependencies=[Depends(verify_vapi)])
+async def classify_vehicle_endpoint(request: Request):
     """Check a vehicle BEFORE going through the rest of booking — so a category
     that needs different handling (motorcycle, boat/trailer needing a length,
     or one nothing was recognized for) gets caught in conversation, not as a
@@ -188,6 +219,11 @@ def classify_vehicle_endpoint(args: ClassifyVehicleArgs) -> ClassifyVehicleRespo
         is_length_based,
         is_unsupported_vehicle,
     )
+
+    args_dict, tool_call_id = await parse_tool_call(request)
+    args, early = _validated(ClassifyVehicleArgs, args_dict, tool_call_id)
+    if early is not None:
+        return early
 
     category = classify_vehicle_smart(args.vehicle)
     supported = not is_unsupported_vehicle(category)
@@ -213,19 +249,31 @@ def classify_vehicle_endpoint(args: ClassifyVehicleArgs) -> ClassifyVehicleRespo
     else:
         note = f"Recognized as a {category}. Proceed with list_services and booking as normal."
 
-    return ClassifyVehicleResponse(
+    payload = ClassifyVehicleResponse(
         vehicle=args.vehicle,
         category=category,
         supported=supported,
         length_based=length_based,
         note=note,
     )
+    return tool_response(payload.model_dump(), tool_call_id)
 
 
 @router.post("/book_appointment", dependencies=[Depends(verify_vapi)])
-def book_appointment(args: VoiceBookingCreate, db: Session = Depends(get_db)) -> dict:
-    booking = booking_service.create_booking(db, args, source="voice")
-    return {
+async def book_appointment(request: Request, db: Session = Depends(get_db)):
+    args_dict, tool_call_id = await parse_tool_call(request)
+    args, early = _validated(VoiceBookingCreate, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
+    try:
+        booking = booking_service.create_booking(db, args, source="voice")
+    except HTTPException as exc:
+        if tool_call_id is not None:
+            return tool_response(str(exc.detail), tool_call_id)
+        raise
+
+    result = {
         "booking_id": booking.id,
         "starts_at": booking.starts_at.isoformat(),
         "state": booking.state,
@@ -241,6 +289,7 @@ def book_appointment(args: VoiceBookingCreate, db: Session = Depends(get_db)) ->
             "may be less than what you asked for if it hit the price floor)."
         ),
     }
+    return tool_response(result, tool_call_id)
 
 
 class CurrentTimeArgs(BaseModel):
@@ -257,21 +306,25 @@ class CurrentTimeArgs(BaseModel):
             return None
 
 
-@router.post(
-    "/current_time", response_model=CurrentTimeResponse, dependencies=[Depends(verify_vapi)]
-)
-def current_time(args: CurrentTimeArgs) -> CurrentTimeResponse:
+@router.post("/current_time", dependencies=[Depends(verify_vapi)])
+async def current_time(request: Request):
     """Deterministic — the real clock, not the model guessing what time it is.
     Call right before ending a call, so the sign-off matches the caller's actual
     local time of day."""
+    args_dict, tool_call_id = await parse_tool_call(request)
+    args, early = _validated(CurrentTimeArgs, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
     period, closing_line, now = period_and_closing_line(args.state)
-    return CurrentTimeResponse(
+    payload = CurrentTimeResponse(
         state=args.state,
         local_time=now.isoformat(),
         hour=now.hour,
         period=period,
         closing_line=closing_line,
     )
+    return tool_response(payload.model_dump(), tool_call_id)
 
 
 class LookupArgs(BaseModel):
@@ -279,9 +332,14 @@ class LookupArgs(BaseModel):
 
 
 @router.post("/lookup_appointments", dependencies=[Depends(verify_vapi)])
-def lookup_appointments(args: LookupArgs, db: Session = Depends(get_db)) -> dict:
+async def lookup_appointments(request: Request, db: Session = Depends(get_db)):
+    args_dict, tool_call_id = await parse_tool_call(request)
+    args, early = _validated(LookupArgs, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
     bookings = booking_service.find_by_phone(db, args.phone)
-    return {
+    result = {
         "count": len(bookings),
         "appointments": [
             {
@@ -293,6 +351,7 @@ def lookup_appointments(args: LookupArgs, db: Session = Depends(get_db)) -> dict
             for b in bookings
         ],
     }
+    return tool_response(result, tool_call_id)
 
 
 class RescheduleArgs(BaseModel):
@@ -302,11 +361,27 @@ class RescheduleArgs(BaseModel):
 
 
 @router.post("/reschedule_appointment", dependencies=[Depends(verify_vapi)])
-def reschedule_appointment(args: RescheduleArgs, db: Session = Depends(get_db)) -> dict:
-    booking = booking_service.reschedule_booking(
-        db, args.booking_id, args.starts_at, args.duration_minutes
-    )
-    return {"booking_id": booking.id, "starts_at": booking.starts_at.isoformat(), "status": booking.status.value}
+async def reschedule_appointment(request: Request, db: Session = Depends(get_db)):
+    args_dict, tool_call_id = await parse_tool_call(request)
+    args, early = _validated(RescheduleArgs, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
+    try:
+        booking = booking_service.reschedule_booking(
+            db, args.booking_id, args.starts_at, args.duration_minutes
+        )
+    except HTTPException as exc:
+        if tool_call_id is not None:
+            return tool_response(str(exc.detail), tool_call_id)
+        raise
+
+    result = {
+        "booking_id": booking.id,
+        "starts_at": booking.starts_at.isoformat(),
+        "status": booking.status.value,
+    }
+    return tool_response(result, tool_call_id)
 
 
 class CancelArgs(BaseModel):
@@ -318,9 +393,21 @@ class CancelArgs(BaseModel):
 
 
 @router.post("/cancel_appointment", dependencies=[Depends(verify_vapi)])
-def cancel_appointment(args: CancelArgs, db: Session = Depends(get_db)) -> dict:
-    booking = booking_service.cancel_booking(db, args.booking_id, args.reason)
-    return {"booking_id": booking.id, "status": booking.status.value}
+async def cancel_appointment(request: Request, db: Session = Depends(get_db)):
+    args_dict, tool_call_id = await parse_tool_call(request)
+    args, early = _validated(CancelArgs, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
+    try:
+        booking = booking_service.cancel_booking(db, args.booking_id, args.reason)
+    except HTTPException as exc:
+        if tool_call_id is not None:
+            return tool_response(str(exc.detail), tool_call_id)
+        raise
+
+    result = {"booking_id": booking.id, "status": booking.status.value}
+    return tool_response(result, tool_call_id)
 
 
 @router.post("/call-ended", dependencies=[Depends(verify_vapi)])
