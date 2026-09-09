@@ -33,7 +33,7 @@ from app.services import booking as booking_service
 from app.services.timezones import period_and_closing_line
 from app.services.us_states import normalize_state
 from app.services import rag
-from app.services.vapi_protocol import parse_tool_call, tool_response
+from app.services.vapi_protocol import parse_tool_call, parse_tool_call_full, tool_response
 
 settings = get_settings()
 router = APIRouter(prefix="/api/vapi", tags=["vapi"])
@@ -333,12 +333,18 @@ class LookupArgs(BaseModel):
 
 @router.post("/lookup_appointments", dependencies=[Depends(verify_vapi)])
 async def lookup_appointments(request: Request, db: Session = Depends(get_db)):
-    args_dict, tool_call_id = await parse_tool_call(request)
+    args_dict, tool_call_id, verified_number = await parse_tool_call_full(request)
     args, early = _validated(LookupArgs, args_dict, tool_call_id)
     if early is not None:
         return early
 
-    bookings = booking_service.find_by_phone(db, args.phone)
+    # Defense-in-depth beyond the system-prompt rule: on a real call, Vapi's own
+    # request carries the verified caller ID — never trust an LLM-supplied phone
+    # number over it, so no amount of prompt injection can browse another
+    # customer's bookings. Falls back to the argument only when no verified
+    # number is available (a web test call, or the flat/legacy admin-test shape).
+    phone = verified_number or args.phone
+    bookings = booking_service.find_by_phone(db, phone)
     result = {
         "count": len(bookings),
         "appointments": [

@@ -338,16 +338,24 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
 - Voice: OpenAI `alloy`; Transcriber: Soniox STT RT v5, background denoising on
 - All 10 tools created as Vapi Tool resources and attached via `model.toolIds`
 - End-of-call webhook and system prompt as documented above
+- `startSpeakingPlan.waitSeconds: 1.0` (up from default 0.4) and
+  `stopSpeakingPlan: {numWords: 2, voiceSeconds: 0.4, backoffSeconds: 1}` — a
+  live test call showed the agent cutting callers off mid-sentence and
+  repeating itself verbatim; this gives the caller more room to finish
+  speaking and requires more than a brief interjection to interrupt the agent
+- System prompt also fixed: a generic "what services do you offer" now gets
+  just the service NAMES (no price, no forcing a vehicle first); a caller's
+  {{customer.number}} that doesn't resolve to a real number (web test calls)
+  is never read aloud as raw template text, the agent asks normally instead
 
-**Caller privacy — hard rule in the system prompt**: `lookup_appointments`'s
-`phone` argument must always be the literal `{{customer.number}}` template
-(which Vapi substitutes with the real verified caller ID before the request
-ever reaches the backend), never a number the caller speaks aloud or asks
-about on someone else's behalf. This is prompt-level enforcement, not a
-backend check — the backend's `/api/vapi/lookup_appointments` endpoint
-currently trusts whatever `phone` value it's given, since Vapi's custom-tool
-webhook for this project sends only the flat function arguments with no
-additional verified-caller context in the body to check against. If a
-stronger guarantee is ever needed, that would require confirming Vapi does
-send call/customer context in this request and having the backend prefer
-that over the LLM-supplied argument — not yet verified.
+**Caller privacy — enforced at both the prompt AND the backend**: the system
+prompt tells the model `lookup_appointments`'s `phone` argument must always be
+the literal `{{customer.number}}` template, and to refuse any request to look
+up a different person's booking. On top of that, `/api/vapi/lookup_appointments`
+now also ignores the LLM-supplied `phone` argument whenever Vapi's own request
+carries the real verified caller ID (`call.customer.number`, present on every
+real phone call) — using that instead, regardless of what argument the model
+was tricked into sending. A malicious or confused prompt can no longer browse
+another customer's bookings even if it tries. This only degrades to
+prompt-level-only enforcement on a web/browser test call, which has no real
+caller ID to verify against.

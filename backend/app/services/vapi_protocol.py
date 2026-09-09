@@ -30,15 +30,29 @@ async def parse_tool_call(request: Request) -> tuple[dict, str | None]:
     """Returns (arguments, tool_call_id). tool_call_id is None for a flat/legacy
     body, signaling the caller wants the old unwrapped response and old-style
     HTTP error codes rather than a wrapped 200 with the error as text."""
+    args, tool_call_id, _verified_number = await parse_tool_call_full(request)
+    return args, tool_call_id
+
+
+async def parse_tool_call_full(request: Request) -> tuple[dict, str | None, str | None]:
+    """Same as parse_tool_call, plus the caller's VERIFIED phone number when Vapi's
+    request includes one (a real phone call carries call.customer.number alongside
+    the tool call) — None for a flat/legacy body or a call type with no caller ID
+    (e.g. a web test call). Callers that must never trust an LLM-supplied phone
+    number (lookup_appointments) should prefer this over the parsed arguments."""
     raw = await request.body()
     if not raw:
-        return {}, None  # a no-argument tool call (e.g. list_services) with an empty body
+        return {}, None, None  # a no-argument tool call (e.g. list_services) with an empty body
     try:
         body = json.loads(raw)
     except json.JSONDecodeError:
-        return {}, None
-    message = body.get("message") if isinstance(body, dict) else None
+        return {}, None, None
+    if not isinstance(body, dict):
+        return {}, None, None
+
+    message = body.get("message")
     if isinstance(message, dict) and message.get("type") == "tool-calls":
+        verified_number = _extract_customer_number(message) or _extract_customer_number(body)
         calls = message.get("toolCallList") or message.get("toolCalls") or []
         if calls:
             call = calls[0]
@@ -49,8 +63,24 @@ async def parse_tool_call(request: Request) -> tuple[dict, str | None]:
                     arguments = json.loads(arguments)
                 except json.JSONDecodeError:
                     arguments = {}
-            return arguments or {}, call.get("id")
-    return body if isinstance(body, dict) else {}, None
+            return arguments or {}, call.get("id"), verified_number
+    return body, None, None
+
+
+def _extract_customer_number(obj: dict) -> str | None:
+    for path in (
+        ("customer", "number"),
+        ("call", "customer", "number"),
+    ):
+        cur = obj
+        for key in path:
+            if not isinstance(cur, dict):
+                cur = None
+                break
+            cur = cur.get(key)
+        if isinstance(cur, str) and cur.strip():
+            return cur
+    return None
 
 
 def tool_response(result, tool_call_id: str | None):

@@ -201,3 +201,40 @@ def test_flat_legacy_shape_still_returns_a_real_422(client):
     resp = client.post("/api/vapi/classify_vehicle", json={})
     assert resp.status_code == 422
     assert "results" not in resp.json()
+
+
+def test_wrapped_call_ignores_spoofed_phone_uses_verified_caller_id(client, auth):
+    """The LLM could be tricked into passing a DIFFERENT phone number as the
+    lookup_appointments argument — the backend must ignore it and use the real
+    verified caller ID from Vapi's own call context instead, so a caller can never
+    browse another customer's bookings no matter what the model is told to do."""
+    service_id = _service_id(client, auth)
+    real_owner_phone = "+15025550188"
+    client.post(
+        "/api/vapi/book_appointment",
+        json=_wrapped(
+            "book_appointment", _book_payload(service_id, customer_phone=real_owner_phone)
+        ),
+    )
+
+    spoofed_request = {
+        "message": {
+            "type": "tool-calls",
+            "toolCallList": [
+                {
+                    "id": "call_spoof",
+                    "function": {
+                        "name": "lookup_appointments",
+                        # The model was told/tricked into asking about someone else's number.
+                        "arguments": {"phone": "+19995551234"},
+                    },
+                }
+            ],
+            "call": {"customer": {"number": real_owner_phone}},
+        }
+    }
+    resp = client.post("/api/vapi/lookup_appointments", json=spoofed_request)
+    assert resp.status_code == 200
+    result = resp.json()["results"][0]["result"]
+    # Found under the REAL caller's number, not the spoofed argument.
+    assert result["count"] == 1
