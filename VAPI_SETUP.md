@@ -345,6 +345,8 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
 - Voice: OpenAI `alloy`; Transcriber: Soniox STT RT v5, background denoising on
 - All 10 tools created as Vapi Tool resources and attached via `model.toolIds`
 - End-of-call webhook and system prompt as documented above
+- Groq credential (own key, not Vapi's default integration — see "Bring-your-own
+  Groq key" below): `0f4becb5-cdb4-43a2-bb45-d1a0fc574f45`
 - `startSpeakingPlan.waitSeconds: 1.0` (up from default 0.4) and
   `stopSpeakingPlan: {numWords: 2, voiceSeconds: 0.4, backoffSeconds: 1}` — a
   live test call showed the agent cutting callers off mid-sentence and
@@ -366,3 +368,46 @@ was tricked into sending. A malicious or confused prompt can no longer browse
 another customer's bookings even if it tries. This only degrades to
 prompt-level-only enforcement on a web/browser test call, which has no real
 caller ID to verify against.
+
+**Bring-your-own Groq key**: the assistant's `model.provider: "groq"` runs
+through Vapi's own Groq integration by default, billed through Vapi's own
+credits — picking "Groq" as the provider does NOT mean it uses your own Groq
+API key automatically. To actually bill against your own Groq account instead
+(likely far cheaper, possibly free-tier), create a credential and attach it:
+
+```
+POST https://api.vapi.ai/credential
+{"provider": "groq", "apiKey": "<your real Groq key>", "name": "..."}
+```
+
+then set the returned `id` in the assistant's top-level (not nested under
+`model`) `credentialIds: ["<that id>"]`. Both live assistants below have
+this wired to a real Groq key already in `backend/.env`.
+
+---
+
+## Second account (2026-09-09)
+
+A second, separate Vapi org was set up identically to the first — same tool
+set, same system prompt, same model/voice/transcriber/speaking-plan tuning,
+same Groq BYOK credential (using the same key from `.env`):
+
+- Assistant: `ShinePro Detailing` (id `651b3fd6-1a07-4e91-860f-121b14bcd928`,
+  orgId `a4fa03d9-7d16-48ea-9f33-702dc50be322`)
+- Phone number: `+1 (901) 592-2481`
+- Tool IDs (this org, distinct from the first account's tool IDs since tools
+  are org-scoped): ask `4c8489a6-accd-4352-91e1-798ee5b823f2`, list_slots
+  `b139f145-9c6f-4251-9003-ae7c23cf75e1`, classify_vehicle
+  `1c0f0e25-de76-4888-b4a4-0d31ea898d2e`, list_services
+  `67fc378b-0f75-4afd-aa59-db36b29ea363`, list_addons
+  `12552942-8471-40aa-b228-439f635da839`, current_time
+  `f8ddd854-cd44-40fe-a6f6-1a6173486a2e`, book_appointment
+  `e849dc4a-560b-4d15-95d7-e6c183a4b84e`, lookup_appointments
+  `151bff68-6cf3-4a41-9397-6f03ff99f3e2`, reschedule_appointment
+  `848a3753-bc25-4b65-99f6-22f4ac86b722`, cancel_appointment
+  `cc12423a-820b-4d22-a618-0133d437497a`
+- Groq credential: `e01b5b15-942c-44ff-9822-7975cfa0370f`
+
+Both accounts point at the same backend (`API_BASE`/`VAPI_SECRET` unchanged)
+and the same database — a booking made through either number shows up in the
+same admin dashboard.
