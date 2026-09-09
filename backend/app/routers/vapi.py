@@ -124,42 +124,43 @@ async def list_slots(request: Request, db: Session = Depends(get_db)):
     return tool_response(result, tool_call_id)
 
 
+def _price_entry(price_cents: int, min_price_cents: int | None) -> dict | int:
+    """Most rows have no floor — return the bare cents value then, only the
+    (rarer) floored rows pay for the extra object nesting. Cuts real token
+    weight off list_services/list_addons, which get resent in full on every
+    turn of a call once used — a real cost, not a cosmetic one."""
+    if min_price_cents is None:
+        return price_cents
+    return {"price_cents": price_cents, "min_price_cents": min_price_cents}
+
+
 @router.post("/list_services", dependencies=[Depends(verify_vapi)])
 async def list_services(request: Request, db: Session = Depends(get_db)):
     """So the agent can quote a real price before booking — never estimate one.
     Prices genuinely differ by vehicle type: each service lists its price PER
     CATEGORY (a missing category means that service isn't offered for that
-    vehicle at all), or a per-foot rate for boat/trailer services."""
+    vehicle at all, unless price_per_foot_cents is set — then it's priced by
+    length instead), or a flat_price_cents for a same-price-everywhere service.
+    A category value is just the price in cents, UNLESS the service can be
+    discounted down to a floor for that category, in which case it's
+    {"price_cents", "min_price_cents"} instead."""
     _args_dict, tool_call_id = await parse_tool_call(request)
     services = db.execute(
         select(Service).where(Service.active).order_by(Service.name)
     ).scalars().all()
-    result = {
-        "services": [
-            {
-                "service_id": s.id,
-                "name": s.name,
-                "duration_minutes": s.duration_minutes,
-                "price_per_foot_cents": s.price_per_foot_cents,
-                "prices_by_vehicle_category": (
-                    {p.category: {"price_cents": p.price_cents, "min_price_cents": p.min_price_cents} for p in s.prices}
-                    if s.prices
-                    else None
-                ),
-                "flat_price_cents": s.price_cents if not s.prices and s.price_per_foot_cents is None else None,
-                "note": (
-                    "Priced per foot — you need the vehicle's length to quote this."
-                    if s.price_per_foot_cents is not None
-                    else "Only offered for the vehicle categories listed in prices_by_vehicle_category — "
-                    "if the caller's category isn't a key here, this service isn't available for them."
-                    if s.prices
-                    else "Same price for every vehicle."
-                ),
+    out = []
+    for s in services:
+        item: dict = {"service_id": s.id, "name": s.name, "duration_minutes": s.duration_minutes}
+        if s.price_per_foot_cents is not None:
+            item["price_per_foot_cents"] = s.price_per_foot_cents
+        elif s.prices:
+            item["prices_by_vehicle_category"] = {
+                p.category: _price_entry(p.price_cents, p.min_price_cents) for p in s.prices
             }
-            for s in services
-        ]
-    }
-    return tool_response(result, tool_call_id)
+        else:
+            item["flat_price_cents"] = s.price_cents
+        out.append(item)
+    return tool_response({"services": out}, tool_call_id)
 
 
 @router.post("/list_addons", dependencies=[Depends(verify_vapi)])
@@ -180,28 +181,17 @@ async def list_addons(request: Request, db: Session = Depends(get_db)):
     are the exceptions — their price varies by category, same as a full service."""
     _args_dict, tool_call_id = await parse_tool_call(request)
     addons = db.execute(select(AddOn).where(AddOn.active).order_by(AddOn.name)).scalars().all()
-    result = {
-        "addons": [
-            {
-                "addon_id": a.id,
-                "name": a.name,
-                "duration_minutes": a.duration_minutes,
-                "prices_by_vehicle_category": (
-                    {p.category: {"price_cents": p.price_cents, "min_price_cents": p.min_price_cents} for p in a.prices}
-                    if a.prices
-                    else None
-                ),
-                "flat_price_cents": a.price_cents if not a.prices else None,
-                "note": (
-                    "Only offered for the vehicle categories listed in prices_by_vehicle_category."
-                    if a.prices
-                    else "Same price for every vehicle."
-                ),
+    out = []
+    for a in addons:
+        item: dict = {"addon_id": a.id, "name": a.name, "duration_minutes": a.duration_minutes}
+        if a.prices:
+            item["prices_by_vehicle_category"] = {
+                p.category: _price_entry(p.price_cents, p.min_price_cents) for p in a.prices
             }
-            for a in addons
-        ]
-    }
-    return tool_response(result, tool_call_id)
+        else:
+            item["flat_price_cents"] = a.price_cents
+        out.append(item)
+    return tool_response({"addons": out}, tool_call_id)
 
 
 class ClassifyVehicleArgs(BaseModel):

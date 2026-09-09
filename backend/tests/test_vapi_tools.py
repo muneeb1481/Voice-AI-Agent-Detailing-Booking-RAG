@@ -66,13 +66,23 @@ def test_voice_booking_without_vehicle_is_rejected(client, auth):
 
 
 def test_list_services_tool_returns_pricing(client):
+    """The Vapi tool response is deliberately slim — see _price_entry in
+    routers/vapi.py — a category with no floor is just the bare cents value,
+    not a nested object, to cut real token weight off what gets resent on
+    every turn of a call. A floored category (Interior Detailing Only) still
+    comes back as {"price_cents", "min_price_cents"}."""
     resp = client.post("/api/vapi/list_services")
     assert resp.status_code == 200
     services = resp.json()["services"]
     assert len(services) > 0
     by_name = {s["name"]: s for s in services}
-    assert by_name["Interior & Exterior Detailing"]["prices_by_vehicle_category"]["sedan"]["price_cents"] == 20000
+    assert by_name["Interior & Exterior Detailing"]["prices_by_vehicle_category"]["sedan"] == 20000
+    assert by_name["Interior Detailing Only"]["prices_by_vehicle_category"]["sedan"] == {
+        "price_cents": 15000,
+        "min_price_cents": 15000,
+    }
     assert by_name["Boat Detailing"]["price_per_foot_cents"] == 3500
+    assert "note" not in by_name["Interior & Exterior Detailing"]
 
 
 def test_list_slots_tool(client):
