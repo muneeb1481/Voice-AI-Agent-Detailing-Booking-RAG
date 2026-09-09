@@ -239,8 +239,11 @@ def seed(db: Session) -> None:
                     min_price_cents=min_price,
                 )
             )
-        elif found.min_price_cents != min_price:
-            found.min_price_cents = min_price
+        else:
+            if found.price_cents != price:
+                found.price_cents = price
+            if found.min_price_cents != min_price:
+                found.min_price_cents = min_price
 
     # Waxing Only genuinely varies by vehicle category (unlike the flat add-ons
     # above) — keep price_cents/min_price_cents as a sedan-equivalent fallback for

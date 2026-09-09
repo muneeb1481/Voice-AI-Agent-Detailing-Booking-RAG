@@ -1,0 +1,294 @@
+# What the Server / Voice Agent Actually Knows
+
+This is a reference dump of every fact the backend or the LLM (Kimi/Groq, on a
+phone call or in the Ask Agent test box) can draw on — pulled directly from the
+live database on 2026-09-09, not retyped from memory. If the catalog changes,
+regenerate this rather than hand-editing it.
+
+There are **two separate knowledge sources**, and they answer two separate
+kinds of question:
+
+1. **The booking catalog** (`services`, `service_prices`, `add_ons`,
+   `add_on_prices` tables) — the source of truth for what a booking actually
+   costs. `list_services` / `list_addons` (Vapi tools) and the admin API read
+   from here. This is never guessed or improvised.
+2. **The uploaded RAG document** (`shinepro-pricing (1).md`, indexed for the
+   `ask` tool / Ask Agent) — used for freeform Q&A ("how much is X", "do you
+   serve Texas") when a caller isn't actively booking. It's a separate file an
+   admin uploaded, and the numbers on it should match the catalog above — see
+   **Known discrepancies** at the bottom for the two places they've drifted.
+
+---
+
+## 1. Services (from the booking catalog — what's actually charged)
+
+Prices vary by vehicle category. A service with no row for a category isn't
+offered for that vehicle at all — the voice agent is told to say so and
+suggest an alternative rather than guessing a price.
+
+### Interior & Exterior Detailing — 120 min
+| Category | Price |
+|---|---|
+| Sedan | $200 |
+| SUV | $220 |
+| Truck | $220 |
+| Coupe | $200 |
+| Van | $400 |
+| Mini Van | $300 |
+| Hatchback | $200 (priced like a sedan) |
+
+### Interior Detailing Only — 90 min
+Has a **price floor** — the minimum this can be discounted down to when a
+customer insists.
+| Category | Price | Floor |
+|---|---|---|
+| Sedan | $150 | $150 (no room — already at floor) |
+| SUV | $180 | $170 |
+| Truck | $170 | $170 (no room) |
+| Coupe | $160 | $160 (no room) |
+| Van | $250 | $250 (no room) |
+| Mini Van | $200 | $200 (no room) |
+| Hatchback | $150 | $150 (no room) |
+
+### Buffing & Waxing — 150 min
+There is **no standalone "buffing" service or add-on**. Buffing always
+includes waxing and is only ever sold as this bundled service — a caller
+asking for "just buffing" should be quoted this price for their vehicle.
+| Category | Price |
+|---|---|
+| Sedan | $200 |
+| SUV | $200 |
+| Truck | $200 |
+| Coupe | $200 |
+| Van | $300 |
+| Mini Van | $200 |
+| Hatchback | $200 |
+
+### Paint Correction — 390 min (5–8 hours, all three levels)
+| Level | Sedan/SUV/Truck/Coupe/Mini Van/Hatchback | Van |
+|---|---|---|
+| Level 1 (minor swirls) | $400 | $500 |
+| Level 2 (moderate scratches, multi-stage polish) | $1,000 | $1,000 |
+| Level 3 (deep scratches, 3-stage correction, showroom finish) | $1,500 | $1,500 |
+
+### Ceramic Coating — 150 min — **Sedan / SUV / Truck only**, not offered for coupe, van, minivan
+| Tier | Price |
+|---|---|
+| 2 Year | $400 |
+| 3 Year | $800 |
+| 5 Year | $1,200 |
+
+### Motorcycle Full Detailing — 90 min
+$170 flat. Motorcycles are a fully bookable, real category — not rejected.
+
+### Boat Detailing — 120 min, and Trailer Detailing — 90 min
+**$35 per foot**, not a category lookup — the agent must ask the caller for
+the length in feet (`vehicle_length_ft`) before it can quote or book.
+
+---
+
+## 2. Add-ons (from the booking catalog)
+
+Small extras stacked on top of a base service. Most are flat-priced
+regardless of vehicle; **Waxing Only is the one exception** and varies by
+category like a service does.
+
+| Add-on | Duration | Price | Floor |
+|---|---|---|---|
+| Pet Hair Removal | 45 min | $70 | none |
+| Headlight Restoration | 45 min | $100 | none |
+| Headliner Cleaning | 45 min | $50 | none |
+| Engine Bay Cleaning | 30 min | $70 | none |
+| **Waxing Only** — Sedan/SUV/Truck/Coupe/Hatchback | 30 min | $70 | **$50** |
+| **Waxing Only** — Van/Mini Van | 30 min | $100 | **$50** |
+
+Waxing Only's $50 floor is **insist-only** — it's never the default quote,
+only what a customer can be discounted down to if they push back on price.
+
+---
+
+## 3. Discount / negotiation policy
+
+If a caller says a price is too expensive:
+- Offer **$10 off the total package price** — never off one individual line
+  item inside it.
+- If they still object, offer another $10, and this can repeat.
+- The backend clamps every discount request server-side to the **combined
+  floor** of every item in the booking (base service + any extra services +
+  any add-ons) — the agent never has to calculate the floor itself, it just
+  keeps offering $10 increments and reads back whatever `price_cents` the
+  backend actually returns.
+- Never offered proactively — only in response to the caller objecting.
+
+---
+
+## 4. Vehicle categories the classifier recognizes
+
+Keyword match first (instant, free); an LLM call (Kimi, falling back to Groq)
+only fires when nothing in the list below matches.
+
+- **Standard** (priced per the tables above): `sedan`, `suv`, `truck`,
+  `coupe`, `van`, `minivan`, `hatchback` (priced as sedan)
+- **Special**: `motorcycle` — its own flat-priced service
+- **Length-based**: `boat`, `trailer` — priced per foot, needs a length
+- Recognizes dozens of real makes/models per category (F-150, Silverado,
+  Tacoma → truck; CR-V, RAV4, Wrangler → suv; Corolla, Camry, Civic → sedan;
+  Sienna, Odyssey → minivan; Sprinter, Transit → van; Mustang, Camaro →
+  coupe; Ninja, Harley, Vespa → motorcycle; pontoon, yacht, bass boat →
+  boat), plus hyphenated model names (F-150, CR-V) handled correctly.
+
+---
+
+## 5. Booking rules
+
+- **Hours**: 8:00 AM – 6:00 PM, **in the customer's own local time** (real
+  per-state timezone lookup, not server UTC) — 7 days a week.
+- **Booking window**: up to 60 days ahead; nothing in the past.
+- **Service area**: fully mobile, all US states.
+- Vehicle access and a parking space needed; the crew brings their own water
+  and power.
+
+---
+
+## 6. The RAG document, verbatim (what `ask` / Ask Agent is grounded in)
+
+This is the exact text of the uploaded `shinepro-pricing (1).md` document
+that answers freeform questions like "how much is X" or "do you do Y":
+
+> # ShinePro Detailing - Pricing Menu
+>
+> ## Standard Vehicles
+>
+> ### SUV
+> | Service | Price |
+> |---|---|
+> | Interior & Exterior Detailing | $220 |
+> | Buffing & Waxing | $200 |
+> | Interior Detailing Only | $180 |
+> | Paint Correction Level 1 | $400 |
+> | Paint Correction Level 2 | $1,000 |
+> | Paint Correction Level 3 | $1,500 |
+>
+> ### Sedan
+> | Service | Price |
+> |---|---|
+> | Interior & Exterior Detailing | $200 |
+> | Buffing & Waxing | $200 |
+> | Interior Detailing Only | $170 |
+> | Paint Correction Level 1 | $400 |
+> | Paint Correction Level 2 | $1,000 |
+> | Paint Correction Level 3 | $1,500 |
+>
+> ### Truck
+> | Service | Price |
+> |---|---|
+> | Interior & Exterior Detailing | $220 |
+> | Buffing & Waxing | $200 |
+> | Paint Correction Level 1 | $400 |
+> | Paint Correction Level 2 | $1,000 |
+> | Paint Correction Level 3 | $1,500 |
+>
+> ### Coupe
+> | Service | Price |
+> |---|---|
+> | Interior & Exterior Detailing | $200 |
+> | Buffing & Waxing | $200 |
+> | Interior Detailing Only | $180 |
+> | Paint Correction Level 1 | $400 |
+> | Paint Correction Level 2 | $1,000 |
+> | Paint Correction Level 3 | $1,500 |
+>
+> ## Larger Vehicles
+>
+> ### Van
+> | Service | Price |
+> |---|---|
+> | Interior & Exterior Detailing | $400 |
+> | Buffing & Waxing | $300 |
+> | Interior Detailing Only | $250 |
+> | Paint Correction Level 1 | $500 |
+> | Paint Correction Level 2 | $1,000 |
+> | Paint Correction Level 3 | $1,500 |
+>
+> ### Mini Van
+> | Service | Price |
+> |---|---|
+> | Interior & Exterior Detailing | $300 |
+> | Buffing & Waxing | $200 |
+> | Interior Detailing Only | $200 |
+> | Paint Correction Level 1 | $400 |
+> | Paint Correction Level 2 | $1,000 |
+> | Paint Correction Level 3 | $1,500 |
+>
+> ## Motorcycle
+> | Service | Price |
+> |---|---|
+> | Full Detailing | $170 |
+>
+> ## À La Carte Services
+> | Service | Price |
+> |---|---|
+> | Pet Hair Removal | $70 |
+> | Waxing Only | $70 |
+> | Headlight Restoration | $100 |
+> | Headliner Cleaning | $50 |
+> | Engine Bay Cleaning | $70 |
+>
+> ## Premium Add-Ons
+>
+> ### Ceramic Coating
+> *Available for: Sedan, SUV, Truck*
+> | Duration | Price |
+> |---|---|
+> | 2 Year Protection | $400 |
+> | 3 Year Protection | $800 |
+> | 5 Year Protection | $1,200 |
+>
+> ### Boat Detailing
+> **$35 per foot**
+>
+> ## Service Descriptions
+>
+> ### Interior Detailing
+> Includes:
+> - Thorough vacuuming of seats, carpets, floor mats, and trunk area
+> - Complete wipe-down of all interior surfaces including dashboard, door
+>   panels, center console, and trims
+> - All plastic components carefully dressed to restore a clean, refined finish
+> - Interior windows cleaned for clear visibility
+> - Cabin finished with long-lasting air freshener
+>
+> ### Exterior Detailing
+> Includes:
+> - Foam-based hand wash followed by pressure rinse to safely remove dirt and
+>   contaminants
+> - Wheels, tires, and rims cleaned, degreased, and dressed for a fresh
+>   appearance
+> - Door jambs and trunk seals carefully cleaned
+> - Vehicle dried using microfiber towels to prevent scratches and water spots
+>
+> *Contact ShinePro Detailing for custom packages and fleet discounts!*
+
+---
+
+## Known discrepancies (RAG document vs. real booking catalog)
+
+The RAG document above is what conversational Q&A quotes; the tables in
+sections 1–2 are what a booking actually charges. Two things have drifted
+since the catalog was extended:
+
+1. **Waxing Only**: RAG doc says a flat $70 for every vehicle. The real
+   catalog charges **$100 for Van/Mini Van** (still $70 for everything else),
+   with a $50 insist-only floor everywhere. A caller asking "how much is
+   waxing for my van" via `ask` will currently hear the wrong (lower) number.
+2. **Trailer Detailing**: not mentioned in the RAG document at all, even
+   though it's a real bookable service ($35/ft, same as Boat Detailing).
+3. **Interior Detailing Only price floors**: not mentioned in the RAG
+   document — a caller asking generally "what's your cheapest interior
+   detail" won't hear about the floor concept at all (this only matters for
+   the negotiation flow, which the voice agent already handles correctly via
+   `book_appointment`'s server-side clamping regardless of what the RAG doc says).
+
+None of this affects what a booking actually costs — the booking catalog
+(section 1–2) is always what's charged, `ask` is Q&A-only. But it's worth
+re-uploading an updated pricing document to keep freeform answers accurate.
