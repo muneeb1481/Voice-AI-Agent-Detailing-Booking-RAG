@@ -319,3 +319,29 @@ Saved calls show up in the admin dashboard under **Calls**.
 - [ ] Test call: mention a boat — confirm it asks for length in feet and prices at $35/ft
 - [ ] Test call: object to the price twice — confirm it offers $10 off each time, stopping at the floor
 - [ ] After a test call, check the **Calls** page in the dashboard for the saved transcript
+
+---
+
+## Live deployment (2026-09-09)
+
+Configured end-to-end via Vapi's API (not just this doc — the actual live assistant):
+
+- Assistant: `ShinePro Detailing` (id `e2b81a8f-720b-4194-9d80-e834eed3fdd5`)
+- Phone number: `+1 (901) 592-2399`
+- Model: `moonshotai/kimi-k2-instruct-0905` via Groq, temperature `0.3`
+- Voice: OpenAI `alloy`; Transcriber: Soniox STT RT v5, background denoising on
+- All 10 tools created as Vapi Tool resources and attached via `model.toolIds`
+- End-of-call webhook and system prompt as documented above
+
+**Caller privacy — hard rule in the system prompt**: `lookup_appointments`'s
+`phone` argument must always be the literal `{{customer.number}}` template
+(which Vapi substitutes with the real verified caller ID before the request
+ever reaches the backend), never a number the caller speaks aloud or asks
+about on someone else's behalf. This is prompt-level enforcement, not a
+backend check — the backend's `/api/vapi/lookup_appointments` endpoint
+currently trusts whatever `phone` value it's given, since Vapi's custom-tool
+webhook for this project sends only the flat function arguments with no
+additional verified-caller context in the body to check against. If a
+stronger guarantee is ever needed, that would require confirming Vapi does
+send call/customer context in this request and having the backend prefer
+that over the LLM-supplied argument — not yet verified.
