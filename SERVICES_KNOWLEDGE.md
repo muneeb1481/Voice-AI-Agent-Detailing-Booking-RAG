@@ -180,8 +180,10 @@ only fires when nothing in the list below matches.
 
 ## 6. The RAG document, verbatim (what `ask` / Ask Agent is grounded in)
 
-This is the exact text of the uploaded `shinepro-pricing (1).md` document
-that answers freeform questions like "how much is X" or "do you do Y":
+Re-ingested on 2026-09-09 to add Buffing, Exterior Detailing, and Shampooing
+(previously missing entirely — see prior discrepancy notes below), fix Waxing
+Only's per-category pricing, and add Trailer Detailing. This is the exact
+text of the `shinepro-pricing (1).md` document now indexed:
 
 > # ShinePro Detailing - Pricing Menu
 >
@@ -191,8 +193,10 @@ that answers freeform questions like "how much is X" or "do you do Y":
 > | Service | Price |
 > |---|---|
 > | Interior & Exterior Detailing | $220 |
-> | Buffing & Waxing | $200 |
 > | Interior Detailing Only | $180 |
+> | Exterior Detailing Only | $180 |
+> | Buffing & Waxing | $200 |
+> | Buffing Only (no wax) | $200 |
 > | Paint Correction Level 1 | $400 |
 > | Paint Correction Level 2 | $1,000 |
 > | Paint Correction Level 3 | $1,500 |
@@ -201,8 +205,10 @@ that answers freeform questions like "how much is X" or "do you do Y":
 > | Service | Price |
 > |---|---|
 > | Interior & Exterior Detailing | $200 |
-> | Buffing & Waxing | $200 |
 > | Interior Detailing Only | $170 |
+> | Exterior Detailing Only | $150 |
+> | Buffing & Waxing | $200 |
+> | Buffing Only (no wax) | $200 |
 > | Paint Correction Level 1 | $400 |
 > | Paint Correction Level 2 | $1,000 |
 > | Paint Correction Level 3 | $1,500 |
@@ -211,7 +217,10 @@ that answers freeform questions like "how much is X" or "do you do Y":
 > | Service | Price |
 > |---|---|
 > | Interior & Exterior Detailing | $220 |
+> | Interior Detailing Only | $170 |
+> | Exterior Detailing Only | $170 |
 > | Buffing & Waxing | $200 |
+> | Buffing Only (no wax) | $200 |
 > | Paint Correction Level 1 | $400 |
 > | Paint Correction Level 2 | $1,000 |
 > | Paint Correction Level 3 | $1,500 |
@@ -220,8 +229,10 @@ that answers freeform questions like "how much is X" or "do you do Y":
 > | Service | Price |
 > |---|---|
 > | Interior & Exterior Detailing | $200 |
-> | Buffing & Waxing | $200 |
 > | Interior Detailing Only | $180 |
+> | Exterior Detailing Only | $160 |
+> | Buffing & Waxing | $200 |
+> | Buffing Only (no wax) | $200 |
 > | Paint Correction Level 1 | $400 |
 > | Paint Correction Level 2 | $1,000 |
 > | Paint Correction Level 3 | $1,500 |
@@ -232,8 +243,10 @@ that answers freeform questions like "how much is X" or "do you do Y":
 > | Service | Price |
 > |---|---|
 > | Interior & Exterior Detailing | $400 |
-> | Buffing & Waxing | $300 |
 > | Interior Detailing Only | $250 |
+> | Exterior Detailing Only | $250 |
+> | Buffing & Waxing | $300 |
+> | Buffing Only (no wax) | $300 |
 > | Paint Correction Level 1 | $500 |
 > | Paint Correction Level 2 | $1,000 |
 > | Paint Correction Level 3 | $1,500 |
@@ -242,8 +255,10 @@ that answers freeform questions like "how much is X" or "do you do Y":
 > | Service | Price |
 > |---|---|
 > | Interior & Exterior Detailing | $300 |
-> | Buffing & Waxing | $200 |
 > | Interior Detailing Only | $200 |
+> | Exterior Detailing Only | $200 |
+> | Buffing & Waxing | $200 |
+> | Buffing Only (no wax) | $200 |
 > | Paint Correction Level 1 | $400 |
 > | Paint Correction Level 2 | $1,000 |
 > | Paint Correction Level 3 | $1,500 |
@@ -253,14 +268,33 @@ that answers freeform questions like "how much is X" or "do you do Y":
 > |---|---|
 > | Full Detailing | $170 |
 >
-> ## À La Carte Services
-> | Service | Price |
+> ## À La Carte Add-Ons (stack on top of any service above)
+> | Add-on | Price |
 > |---|---|
 > | Pet Hair Removal | $70 |
-> | Waxing Only | $70 |
 > | Headlight Restoration | $100 |
 > | Headliner Cleaning | $50 |
 > | Engine Bay Cleaning | $70 |
+>
+> ### Waxing Only (add-on, no buffing) — varies by vehicle
+> | Vehicle | Price |
+> |---|---|
+> | Sedan | $70 |
+> | SUV | $70 |
+> | Truck | $70 |
+> | Coupe | $70 |
+> | Van | $100 |
+> | Mini Van | $100 |
+>
+> ### Shampooing (add-on, carpet/upholstery) — varies by vehicle
+> | Vehicle | Price |
+> |---|---|
+> | Sedan | $50 |
+> | SUV | $50 |
+> | Truck | $50 |
+> | Coupe | $50 |
+> | Mini Van | $50 |
+> | Van | $120 |
 >
 > ## Premium Add-Ons
 >
@@ -273,6 +307,9 @@ that answers freeform questions like "how much is X" or "do you do Y":
 > | 5 Year Protection | $1,200 |
 >
 > ### Boat Detailing
+> **$35 per foot**
+>
+> ### Trailer Detailing
 > **$35 per foot**
 >
 > ## Service Descriptions
@@ -294,6 +331,19 @@ that answers freeform questions like "how much is X" or "do you do Y":
 >   appearance
 > - Door jambs and trunk seals carefully cleaned
 > - Vehicle dried using microfiber towels to prevent scratches and water spots
+> - A wax step is included as part of the exterior detail
+>
+> ### Buffing
+> Machine buffing of the paint to remove light swirl marks and restore gloss.
+> Sold on its own (no wax step) or bundled with waxing as "Buffing & Waxing."
+>
+> ### Waxing Only
+> A protective wax coat applied on its own, without a buffing step. Sold
+> separately from Buffing & Waxing.
+>
+> ### Shampooing
+> Deep shampoo and extraction cleaning of carpets and upholstery, for stains
+> and odors beyond a standard vacuum.
 >
 > *Contact ShinePro Detailing for custom packages and fleet discounts!*
 
@@ -301,27 +351,17 @@ that answers freeform questions like "how much is X" or "do you do Y":
 
 ## Known discrepancies (RAG document vs. real booking catalog)
 
-The RAG document above is what conversational Q&A quotes; the tables in
-sections 1–2 are what a booking actually charges. Two things have drifted
-since the catalog was extended:
+All four discrepancies previously listed here (Waxing Only's flat $70 not
+reflecting the $100 van/minivan price, missing Trailer Detailing, missing
+price floors, and missing Buffing/Exterior Detailing/Shampooing entirely)
+were fixed by re-ingesting the updated document above on 2026-09-09.
+Live-verified: "exterior detailing of suv" → $180, "buffing for a sedan" →
+$200, "waxing of sedan" → $70, "shampooing for a van" → $120, "trailer
+detailing" → $35/ft — all grounded, all matching the booking catalog.
 
-1. **Waxing Only**: RAG doc says a flat $70 for every vehicle. The real
-   catalog charges **$100 for Van/Mini Van** (still $70 for everything else),
-   with a $50 insist-only floor everywhere. A caller asking "how much is
-   waxing for my van" via `ask` will currently hear the wrong (lower) number.
-2. **Trailer Detailing**: not mentioned in the RAG document at all, even
-   though it's a real bookable service ($35/ft, same as Boat Detailing).
-3. **Interior Detailing Only price floors**: not mentioned in the RAG
-   document — a caller asking generally "what's your cheapest interior
-   detail" won't hear about the floor concept at all (this only matters for
-   the negotiation flow, which the voice agent already handles correctly via
-   `book_appointment`'s server-side clamping regardless of what the RAG doc says).
-4. **Buffing, Exterior Detailing, and Shampooing**: none of these three new
-   catalog items appear in the RAG document at all — `ask` will say it
-   doesn't have pricing for them until the document is re-uploaded, even
-   though they're real, bookable items via `list_services`/`list_addons`
-   and the voice agent's booking flow.
-
-None of this affects what a booking actually costs — the booking catalog
-(section 1–2) is always what's charged, `ask` is Q&A-only. But it's worth
-re-uploading an updated pricing document to keep freeform answers accurate.
+One thing still not in the RAG document: **price floors** (e.g. Interior
+Detailing Only's $150–250 floors, Waxing Only's $50 floor, Buffing's implied
+$200 floor via the bundle). This only matters for the negotiation flow,
+which `book_appointment` already enforces correctly server-side regardless
+of what `ask` says — a caller asking generally "what's your cheapest
+interior detail" just won't hear about the floor concept from `ask`.
