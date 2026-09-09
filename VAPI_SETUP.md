@@ -328,7 +328,13 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
 
 - Assistant: `ShinePro Detailing` (id `e2b81a8f-720b-4194-9d80-e834eed3fdd5`)
 - Phone number: `+1 (901) 592-2399`
-- Model: `moonshotai/kimi-k2-instruct-0905` via Groq, temperature `0.3`
+- Model: `llama-3.3-70b-versatile` via Groq, temperature `0.3` (switched from
+  `moonshotai/kimi-k2-instruct-0905` after a live test call showed it not
+  reliably reading/trusting its own successful tool results — every
+  `list_services`/`classify_vehicle` call showed "Completed successfully" in
+  Vapi's own log, and direct backend testing confirmed correct, fast (~0.3s)
+  responses, yet the model narrated them as failures. Llama 3.3 70B has much
+  more established tool-calling reliability; still Groq, no added cost)
 - Voice: OpenAI `alloy`; Transcriber: Soniox STT RT v5, background denoising on
 - All 10 tools created as Vapi Tool resources and attached via `model.toolIds`
 - End-of-call webhook and system prompt as documented above
