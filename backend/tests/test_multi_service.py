@@ -365,6 +365,90 @@ def test_pet_hair_addon_has_no_floor_and_can_discount_to_zero(client, auth):
     assert resp.json()["price_cents"] == 0
 
 
+def test_buffing_is_a_standalone_bookable_service(client, auth):
+    """Buffing alone (no waxing) must be independently bookable, same price as
+    the Buffing & Waxing bundle for that category."""
+    buffing = _service(client, auth, "Buffing")
+    bundle = _service(client, auth, "Buffing & Waxing")
+    assert _sedan_price(buffing) == _sedan_price(bundle) == 20000
+
+    resp = client.post(
+        "/api/bookings",
+        json={
+            "customer_name": "Buffing Only", "customer_phone": "+19015550280",
+            "state": "TN", "zip_code": "38103", "starts_at": future(days=20),
+            "service_id": buffing["id"], "vehicle": "Toyota Corolla",
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["price_cents"] == 20000
+
+
+def test_exterior_detailing_is_a_standalone_bookable_service(client, auth):
+    """Exterior alone must be bookable, priced the same as Interior Detailing Only
+    for that category (mirrored per the shop's instruction)."""
+    exterior = _service(client, auth, "Exterior Detailing")
+    interior = _service(client, auth, "Interior Detailing Only")
+    assert _sedan_price(exterior) == _sedan_price(interior) == 15000
+
+    resp = client.post(
+        "/api/bookings",
+        json={
+            "customer_name": "Exterior Only", "customer_phone": "+19015550281",
+            "state": "TN", "zip_code": "38103", "starts_at": future(days=21),
+            "service_id": exterior["id"], "vehicle": "Toyota Corolla",
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["price_cents"] == 15000
+
+
+def test_shampooing_addon_varies_by_vehicle_category(client, auth):
+    shampoo = _addon(client, auth, "Shampooing")
+    by_category = {p["category"]: p for p in shampoo["prices"]}
+    assert by_category["sedan"]["price_cents"] == 5000
+    assert by_category["truck"]["price_cents"] == 5000
+    assert by_category["minivan"]["price_cents"] == 5000
+    assert by_category["suv"]["price_cents"] == 5000
+    assert by_category["van"]["price_cents"] == 12000
+    assert all(p["min_price_cents"] is None for p in by_category.values())
+
+
+def test_shampooing_addon_prices_higher_for_van(client, auth):
+    shampoo = _addon(client, auth, "Shampooing")
+
+    resp = client.post(
+        "/api/bookings",
+        json={
+            "customer_name": "Van Shampoo", "customer_phone": "+19015550282",
+            "state": "TN", "zip_code": "38103", "starts_at": future(days=22),
+            "vehicle": "Mercedes Sprinter", "addon_ids": [shampoo["id"]],
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["price_cents"] == 12000
+
+
+def test_bundles_still_bookable_alongside_separate_items(client, auth):
+    """Interior & Exterior Detailing and Buffing & Waxing remain bookable as
+    convenience combos even though their components are now separately bookable."""
+    bundle = _service(client, auth, "Interior & Exterior Detailing")
+    resp = client.post(
+        "/api/bookings",
+        json={
+            "customer_name": "Bundle Booker", "customer_phone": "+19015550283",
+            "state": "TN", "zip_code": "38103", "starts_at": future(days=23),
+            "service_id": bundle["id"], "vehicle": "Toyota Corolla",
+        },
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["price_cents"] == 20000
+
+
 def test_invalid_addon_id_rejected(client, auth):
     base = _service(client, auth, "Interior & Exterior Detailing")
     resp = client.post(

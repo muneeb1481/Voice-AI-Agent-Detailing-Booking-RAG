@@ -2,8 +2,9 @@
 
 This is a reference dump of every fact the backend or the LLM (Kimi/Groq, on a
 phone call or in the Ask Agent test box) can draw on — pulled directly from the
-live database on 2026-09-09, not retyped from memory. If the catalog changes,
-regenerate this rather than hand-editing it.
+live database on 2026-09-09 (updated same day after Buffing, Exterior
+Detailing, and Shampooing were added), not retyped from memory. If the
+catalog changes, regenerate this rather than hand-editing it.
 
 There are **two separate knowledge sources**, and they answer two separate
 kinds of question:
@@ -26,7 +27,11 @@ Prices vary by vehicle category. A service with no row for a category isn't
 offered for that vehicle at all — the voice agent is told to say so and
 suggest an alternative rather than guessing a price.
 
-### Interior & Exterior Detailing — 120 min
+### Interior & Exterior Detailing — 120 min (convenience bundle)
+Interior and Exterior are also independently bookable as their own services
+(see **Interior Detailing Only** below and **Exterior Detailing** further
+down) — this bundle exists for a caller who wants both together at the
+bundle price rather than booking them as two separate line items.
 | Category | Price |
 |---|---|
 | Sedan | $200 |
@@ -50,10 +55,7 @@ customer insists.
 | Mini Van | $200 | $200 (no room) |
 | Hatchback | $150 | $150 (no room) |
 
-### Buffing & Waxing — 150 min
-There is **no standalone "buffing" service or add-on**. Buffing always
-includes waxing and is only ever sold as this bundled service — a caller
-asking for "just buffing" should be quoted this price for their vehicle.
+### Buffing & Waxing — 150 min (convenience bundle)
 | Category | Price |
 |---|---|
 | Sedan | $200 |
@@ -63,6 +65,27 @@ asking for "just buffing" should be quoted this price for their vehicle.
 | Van | $300 |
 | Mini Van | $200 |
 | Hatchback | $200 |
+
+### Buffing — 120 min (standalone, no waxing)
+Independently bookable as its own service — same price as the Buffing &
+Waxing bundle above for each category (no separate standalone number was
+ever given, so it mirrors the bundle). Add the **Waxing Only** add-on
+(section 2) on top if the caller wants both but doesn't want the bundle.
+Same price table as Buffing & Waxing above.
+
+### Exterior Detailing — 90 min (standalone, no interior)
+Independently bookable, priced identically to **Interior Detailing Only**
+below for each category (mirrored per the shop's instruction — no separate
+exterior-only number exists). Includes a wax step as part of the detail.
+| Category | Price | Floor |
+|---|---|---|
+| Sedan | $150 | $150 (no room) |
+| SUV | $180 | $170 |
+| Truck | $170 | $170 (no room) |
+| Coupe | $160 | $160 (no room) |
+| Van | $250 | $250 (no room) |
+| Mini Van | $200 | $200 (no room) |
+| Hatchback | $150 | $150 (no room) |
 
 ### Paint Correction — 390 min (5–8 hours, all three levels)
 | Level | Sedan/SUV/Truck/Coupe/Mini Van/Hatchback | Van |
@@ -90,8 +113,10 @@ the length in feet (`vehicle_length_ft`) before it can quote or book.
 ## 2. Add-ons (from the booking catalog)
 
 Small extras stacked on top of a base service. Most are flat-priced
-regardless of vehicle; **Waxing Only is the one exception** and varies by
-category like a service does.
+regardless of vehicle; **Waxing Only and Shampooing are the exceptions** and
+vary by category like a service does. Buffing, Interior Detailing, Exterior
+Detailing, Ceramic Coating, and Paint Correction are NOT add-ons — they're
+full services (section 1), independently bookable in their own right.
 
 | Add-on | Duration | Price | Floor |
 |---|---|---|---|
@@ -101,9 +126,12 @@ category like a service does.
 | Engine Bay Cleaning | 30 min | $70 | none |
 | **Waxing Only** — Sedan/SUV/Truck/Coupe/Hatchback | 30 min | $70 | **$50** |
 | **Waxing Only** — Van/Mini Van | 30 min | $100 | **$50** |
+| **Shampooing** — Sedan/SUV/Truck/Mini Van/Coupe/Hatchback | 45 min | $50 | none |
+| **Shampooing** — Van | 45 min | $120 | none |
 
 Waxing Only's $50 floor is **insist-only** — it's never the default quote,
 only what a customer can be discounted down to if they push back on price.
+Shampooing has no stated floor.
 
 ---
 
@@ -288,6 +316,11 @@ since the catalog was extended:
    detail" won't hear about the floor concept at all (this only matters for
    the negotiation flow, which the voice agent already handles correctly via
    `book_appointment`'s server-side clamping regardless of what the RAG doc says).
+4. **Buffing, Exterior Detailing, and Shampooing**: none of these three new
+   catalog items appear in the RAG document at all — `ask` will say it
+   doesn't have pricing for them until the document is re-uploaded, even
+   though they're real, bookable items via `list_services`/`list_addons`
+   and the voice agent's booking flow.
 
 None of this affects what a booking actually costs — the booking catalog
 (section 1–2) is always what's charged, `ask` is Q&A-only. But it's worth

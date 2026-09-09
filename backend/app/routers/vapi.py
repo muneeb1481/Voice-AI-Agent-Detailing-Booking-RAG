@@ -131,18 +131,20 @@ def list_services(db: Session = Depends(get_db)) -> dict:
 
 @router.post("/list_addons", dependencies=[Depends(verify_vapi)])
 def list_addons(db: Session = Depends(get_db)) -> dict:
-    """Add-ons stack on top of a base service — waxing, paint correction, pet hair
+    """Add-ons stack on top of a base service — waxing, shampooing, pet hair
     removal, engine bay cleaning, headlight restoration, headliner cleaning. Call
     this whenever a caller asks what extras are available, or wants to add something
     beyond the base service.
 
-    NOTE on buffing: there is no standalone "buffing" add-on — buffing is only ever
-    sold bundled with waxing, as the "Buffing & Waxing" full SERVICE (from
-    list_services). If a caller asks for buffing alone, quote them the Buffing &
-    Waxing service price for their vehicle category, not a separate buffing price.
+    NOTE: Buffing, Interior Detailing, Exterior Detailing, Ceramic Coating, and
+    Paint Correction are full SERVICES (from list_services), not add-ons here —
+    each is independently bookable at its own price. "Buffing & Waxing" and
+    "Interior & Exterior Detailing" also still exist as convenience bundle
+    services at their own bundle price. Waxing and Shampooing (this endpoint) are
+    the add-ons a caller stacks on top of whatever service they book.
 
-    Most add-ons are flat regardless of vehicle type. Waxing Only is the one
-    exception — its price varies by category, same as a full service."""
+    Most add-ons are flat regardless of vehicle type. Waxing Only and Shampooing
+    are the exceptions — their price varies by category, same as a full service."""
     addons = db.execute(select(AddOn).where(AddOn.active).order_by(AddOn.name)).scalars().all()
     return {
         "addons": [

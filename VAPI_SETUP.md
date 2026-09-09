@@ -37,7 +37,7 @@ If nothing is found (new customer, or no active booking), collect the following 
 
 2. What service they want. Call `list_services` and read out the REAL price for their specific vehicle category from prices_by_vehicle_category (or price_per_foot_cents x length for boat/trailer) — prices genuinely differ by vehicle type, e.g. the same service can be $200 for a sedan and $400 for a van. NEVER estimate or average a price. If a service has no entry for the caller's category, it isn't offered for that vehicle — say so and suggest an alternative. Get their confirmation, then pass the matching service_id, never invent one.
 
-3. Ask if they'd like to add anything else — another full service, or an add-on like waxing, paint correction, pet hair removal, headlight restoration, headliner cleaning, or engine bay cleaning. Call `list_addons` (and `list_services` again for a second full service) to read out real prices, and pass whatever they choose as extra_service_ids and addon_ids. IMPORTANT: there is no standalone 'buffing' add-on — if a caller asks for buffing (with or without waxing), that is the 'Buffing & Waxing' full SERVICE from list_services, priced by vehicle category, not an add-on. 'Waxing Only' (no buffing) is a real add-on whose price also varies by vehicle category — read the right number for their vehicle from list_addons, don't assume one flat price.
+3. Ask if they'd like to add anything else — another full service, or an add-on like waxing, shampooing, pet hair removal, headlight restoration, headliner cleaning, or engine bay cleaning. Call `list_addons` (and `list_services` again for a second full service) to read out real prices, and pass whatever they choose as extra_service_ids and addon_ids. IMPORTANT: Buffing, Interior Detailing, Exterior Detailing, Ceramic Coating, and Paint Correction are each independently bookable full SERVICES (from list_services), not add-ons — use extra_service_ids for these, not addon_ids. 'Buffing & Waxing' and 'Interior & Exterior Detailing' also still exist as convenience bundle services at their own price if the caller wants both together. 'Waxing Only' and 'Shampooing' are real add-ons whose prices vary by vehicle category — read the right number for their vehicle from list_addons, don't assume one flat price. If a caller asks generically for 'waxing' or 'shampooing' without saying which, that's the add-on, not a bundle.
 
 4. A confirmed open appointment time — call `list_slots` and offer two or three real times.
 
@@ -154,7 +154,7 @@ one to the Assistant. Every tool uses the same two settings for **Server URL** a
 ### Tool 5: `list_addons`
 
 **Description**
-> List every add-on with its price and duration — waxing, paint correction, pet hair removal, engine bay cleaning, headlight restoration, headliner cleaning. Call this whenever a caller asks what extras are available, or wants to add something on top of their base service. There is no standalone 'buffing' add-on — buffing is only sold bundled with waxing as the 'Buffing & Waxing' full service (from list_services). Most add-ons are flat-priced; Waxing Only varies by vehicle category like a service does (see prices_by_vehicle_category).
+> List every add-on with its price and duration — waxing, shampooing, pet hair removal, engine bay cleaning, headlight restoration, headliner cleaning. Call this whenever a caller asks what extras are available, or wants to add something on top of their base service. Buffing, Interior Detailing, Exterior Detailing, Ceramic Coating, and Paint Correction are full SERVICES (from list_services), not add-ons here — each is independently bookable at its own price; 'Buffing & Waxing' and 'Interior & Exterior Detailing' also still exist as convenience bundle services. Most add-ons are flat-priced; Waxing Only and Shampooing vary by vehicle category like a service does (see prices_by_vehicle_category).
 
 **Server URL**
 ```
@@ -216,7 +216,7 @@ one to the Assistant. Every tool uses the same two settings for **Server URL** a
 | `address` | string | Yes | Full street address where the vehicle will be — required, in addition to state and ZIP. |
 | `notes` | string | No |  |
 | `extra_service_ids` | array<string> | No | IDs of any additional full services (beyond service_id) from list_services the caller wants combined into this one appointment. |
-| `addon_ids` | array<string> | No | IDs of any add-ons from list_addons the caller wants — waxing, paint correction, pet hair removal, engine bay cleaning. |
+| `addon_ids` | array<string> | No | IDs of any add-ons from list_addons the caller wants — waxing, shampooing, pet hair removal, engine bay cleaning, headlight restoration, headliner cleaning. Buffing, Interior Detailing, Exterior Detailing, Ceramic Coating, and Paint Correction are full services — pass those in extra_service_ids instead, not here. |
 | `vehicle_length_ft` | number | No | Required ONLY for boat or trailer services — the length in feet. Omit for every other vehicle type. |
 | `discount_cents` | integer | No | Total discount off the whole package, in cents (1000 = $10), if the caller objected to the price. The backend clamps this to the service's price floor — you don't need to calculate the floor yourself, just pass what you offered. |
 

@@ -47,6 +47,29 @@ DEFAULT_SERVICES: list[tuple[str, int, dict]] = [
         },
     ),
     (
+        # Standalone Buffing (no waxing step) is its own bookable service — same
+        # prices as the Buffing & Waxing bundle above (no separate number was ever
+        # given for buffing alone), duration estimated as the bundle's duration
+        # minus Waxing Only's own 30-minute duration.
+        "Buffing",
+        120,
+        {
+            "sedan": (20000, None), "suv": (20000, None), "truck": (20000, None),
+            "coupe": (20000, None), "van": (30000, None), "minivan": (20000, None),
+        },
+    ),
+    (
+        # Standalone Exterior Detailing (no interior step) — same price/floor table
+        # as Interior Detailing Only, since no separate exterior-only number was
+        # given; duration also mirrored from Interior Detailing Only.
+        "Exterior Detailing",
+        90,
+        {
+            "sedan": (15000, 15000), "suv": (18000, 17000), "truck": (17000, 17000),
+            "coupe": (16000, 16000), "van": (25000, 25000), "minivan": (20000, 20000),
+        },
+    ),
+    (
         # The guide states "5-8 hours total" identically for all three correction
         # levels; used the same estimate (6.5h) for each rather than inventing a
         # difference the source doesn't give.
@@ -98,6 +121,16 @@ WAXING_ONLY_FLOOR = 5000
 WAXING_ONLY_PRICES: dict[str, int] = {
     "sedan": 7000, "coupe": 7000, "suv": 7000, "truck": 7000,
     "van": 10000, "minivan": 10000,
+}
+
+# Shampooing: $50 for sedan/SUV/truck/minivan, $120 for van. No stated floor.
+# Duration estimated (carpet/upholstery shampoo, similar order to other add-ons).
+SHAMPOOING_NAME = "Shampooing"
+SHAMPOOING_DURATION = 45
+SHAMPOOING_FLOOR: int | None = None
+SHAMPOOING_PRICES: dict[str, int] = {
+    "sedan": 5000, "coupe": 5000, "suv": 5000, "truck": 5000, "minivan": 5000,
+    "van": 12000,
 }
 
 # Motorcycle detailing is its own single-category service.
@@ -256,6 +289,14 @@ def seed(db: Session) -> None:
         _set_addon_price(db, wax, category, price, WAXING_ONLY_FLOOR)
     if HATCHBACK_LIKE_SEDAN:
         _set_addon_price(db, wax, "hatchback", WAXING_ONLY_PRICES["sedan"], WAXING_ONLY_FLOOR)
+
+    shampoo = _get_or_create_addon(db, SHAMPOOING_NAME, SHAMPOOING_DURATION)
+    shampoo.price_cents = SHAMPOOING_PRICES["sedan"]
+    shampoo.min_price_cents = SHAMPOOING_FLOOR
+    for category, price in SHAMPOOING_PRICES.items():
+        _set_addon_price(db, shampoo, category, price, SHAMPOOING_FLOOR)
+    if HATCHBACK_LIKE_SEDAN:
+        _set_addon_price(db, shampoo, "hatchback", SHAMPOOING_PRICES["sedan"], SHAMPOOING_FLOOR)
 
     for name in DEFAULT_DETAILERS:
         found = db.execute(select(Detailer).where(Detailer.name == name)).scalar_one_or_none()
