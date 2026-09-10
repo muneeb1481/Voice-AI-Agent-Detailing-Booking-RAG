@@ -22,8 +22,16 @@ response, real HTTPException status codes) so nothing already depended on
 that behavior breaks.
 """
 import json
+import logging
+import traceback
+from collections.abc import Callable, Coroutine
+from typing import Any
 
-from fastapi import Request
+from fastapi import HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+
+logger = logging.getLogger("app.vapi")
 
 
 async def parse_tool_call(request: Request) -> tuple[dict, str | None]:
@@ -89,3 +97,64 @@ def tool_response(result, tool_call_id: str | None):
     if tool_call_id is not None:
         return {"results": [{"toolCallId": tool_call_id, "result": result}]}
     return result
+
+
+class SafeToolRoute(APIRoute):
+    """A live call twice showed Vapi's log recording "No result returned" for a
+    tool call — Vapi's own generic error for a response it couldn't parse,
+    which happens on anything but a clean 200 with a proper body. Whatever the
+    underlying cause (a DB hiccup, a cold connection, anything else), an
+    UNHANDLED exception escaping a tool endpoint as a raw 500 is exactly what
+    produces that unparseable response and leaves the LLM with nothing to
+    react to except guessing.
+
+    This wraps every route on the vapi router so that can never happen again:
+    an unhandled exception is logged (with the real traceback, so it's
+    visible in Render's own logs for diagnosing what actually failed, without
+    needing to reproduce it live) and converted into a normal, parseable
+    response instead of an opaque 500 — a wrapped `results` entry for a real
+    Vapi call, or a real HTTP 500 for the flat/legacy admin-test shape
+    (unchanged from before this existed)."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        original = super().get_route_handler()
+
+        async def safe_handler(request: Request) -> Response:
+            try:
+                return await original(request)
+            except HTTPException:
+                # A deliberate raise (bad tool secret, flat-mode validation error,
+                # a domain error in flat/legacy mode) — never mask these, they're
+                # not the unexpected-crash case this route exists to catch.
+                raise
+            except Exception as exc:  # noqa: BLE001 — this route's entire purpose
+                logger.error(
+                    "Unhandled exception on %s %s: %s\n%s",
+                    request.method,
+                    request.url.path,
+                    exc,
+                    traceback.format_exc(),
+                )
+                tool_call_id = None
+                try:
+                    body = json.loads(await request.body())
+                    message = body.get("message") if isinstance(body, dict) else None
+                    if isinstance(message, dict) and message.get("type") == "tool-calls":
+                        calls = message.get("toolCallList") or message.get("toolCalls") or []
+                        if calls:
+                            tool_call_id = calls[0].get("id")
+                except Exception:  # noqa: BLE001 — best-effort only
+                    pass
+
+                error_text = (
+                    "There was a brief technical issue on our end processing that — "
+                    "please try again, or offer to have someone call the customer back."
+                )
+                if tool_call_id is not None:
+                    return JSONResponse(
+                        status_code=200,
+                        content={"results": [{"toolCallId": tool_call_id, "result": error_text}]},
+                    )
+                return JSONResponse(status_code=500, content={"detail": error_text})
+
+        return safe_handler

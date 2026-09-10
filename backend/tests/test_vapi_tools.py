@@ -299,3 +299,40 @@ def test_resolve_date_then_list_slots_matches_reported_bug(client):
             json={"state": "MN", "day": f"{resolved['date']}T00:00:00Z"},
         ).json()
         assert slots["count"] > 0, f"{phrase} ({resolved['date']}) unexpectedly had no slots"
+
+
+def test_unhandled_exception_on_wrapped_call_returns_usable_results(client, monkeypatch):
+    """If anything inside a tool endpoint blows up unexpectedly, a real Vapi call
+    must still get a valid results envelope — never a raw 500 it can't parse (this
+    is exactly what "No result returned" on a live call traces back to). Handled
+    by SafeToolRoute wrapping the whole router, not framework exception-handler
+    middleware — that turned out not to be reliably testable/dispatched."""
+    import app.services.booking as booking_service
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated unexpected failure")
+
+    monkeypatch.setattr(booking_service, "list_slots", _boom)
+
+    resp = client.post(
+        "/api/vapi/list_slots",
+        json=_wrapped("list_slots", {"state": "TN", "day": future(days=6, hour=0)}, "call_boom"),
+    )
+    assert resp.status_code == 200
+    result = resp.json()["results"][0]
+    assert result["toolCallId"] == "call_boom"
+    assert isinstance(result["result"], str)
+    assert "technical issue" in result["result"].lower()
+
+
+def test_unhandled_exception_on_flat_call_still_returns_500(client, monkeypatch):
+    """The flat/legacy admin-test shape keeps its existing real-error behavior."""
+    import app.services.booking as booking_service
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated unexpected failure")
+
+    monkeypatch.setattr(booking_service, "list_slots", _boom)
+
+    resp = client.post("/api/vapi/list_slots", json={"state": "TN", "day": future(days=6, hour=0)})
+    assert resp.status_code == 500

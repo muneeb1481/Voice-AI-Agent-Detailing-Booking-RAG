@@ -33,11 +33,11 @@ from app.services import booking as booking_service
 from app.services.timezones import period_and_closing_line
 from app.services.us_states import normalize_state
 from app.services import rag
-from app.services.vapi_protocol import parse_tool_call, parse_tool_call_full, tool_response
+from app.services.vapi_protocol import SafeToolRoute, parse_tool_call, parse_tool_call_full, tool_response
 from app.services.zip_lookup import state_from_zip
 
 settings = get_settings()
-router = APIRouter(prefix="/api/vapi", tags=["vapi"])
+router = APIRouter(prefix="/api/vapi", tags=["vapi"], route_class=SafeToolRoute)
 
 
 def verify_vapi(x_vapi_secret: str | None = Header(default=None)) -> None:
