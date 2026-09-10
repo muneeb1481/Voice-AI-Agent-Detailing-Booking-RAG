@@ -347,11 +347,16 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
 - End-of-call webhook and system prompt as documented above
 - Groq credential (own key, not Vapi's default integration — see "Bring-your-own
   Groq key" below): `0f4becb5-cdb4-43a2-bb45-d1a0fc574f45`
-- `startSpeakingPlan.waitSeconds: 1.0` (up from default 0.4) and
-  `stopSpeakingPlan: {numWords: 2, voiceSeconds: 0.4, backoffSeconds: 1}` — a
-  live test call showed the agent cutting callers off mid-sentence and
-  repeating itself verbatim; this gives the caller more room to finish
-  speaking and requires more than a brief interjection to interrupt the agent
+- `startSpeakingPlan.waitSeconds: 1.5` (default 0.4, raised twice — 1.0 still
+  wasn't enough, a later live call still showed the agent cutting in and
+  repeating "could you tell me your vehicle type" three times while the
+  caller was mid-sentence) and `stopSpeakingPlan: {numWords: 3, voiceSeconds:
+  0.5, backoffSeconds: 1.5}` — gives the caller real room to finish a
+  sentence and requires more than a brief interjection to interrupt the agent
+- `serverMessages: ["end-of-call-report"]` — was unset (Vapi's full default
+  list), which POSTed every intermediate call event (conversation-update,
+  status-update, etc.) to the call-ended webhook, flooding the admin Calls
+  page with one near-empty row per turn instead of one row per call
 - System prompt also fixed: a generic "what services do you offer" now gets
   just the service NAMES (no price, no forcing a vehicle first); a caller's
   {{customer.number}} that doesn't resolve to a real number (web test calls)
