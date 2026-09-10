@@ -1,0 +1,22 @@
+name: Keep Render backend warm
+
+# Render's free tier spins the service down after ~15 minutes idle. A cold
+# start can take 10-30+ seconds — long enough that a live Vapi call's first
+# tool call can time out and the agent falls back to a wrong answer (e.g.
+# "no availability") instead of the real, just-slow-to-arrive one. Pinging
+# /health every 10 minutes keeps the instance warm so real calls never hit
+# a cold start.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          curl -sf --max-time 30 https://voice-ai-agent-detailing-booking-rag.onrender.com/health \
+            || curl -sf --max-time 30 https://voice-ai-agent-detailing-booking-rag.onrender.com/health
