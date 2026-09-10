@@ -363,18 +363,31 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
   Vapi's own log, and direct backend testing confirmed correct, fast (~0.3s)
   responses, yet the model narrated them as failures. Llama 3.3 70B has much
   more established tool-calling reliability; still Groq, no added cost)
-- Voice: OpenAI `onyx` (switched from `alloy` — reported as sounding female;
-  onyx is a deep male voice); Transcriber: Soniox STT RT v5, background denoising on
-- All 10 tools created as Vapi Tool resources and attached via `model.toolIds`
+- Voice: OpenAI `echo` (went `alloy` → `onyx` → `echo`; alloy was reported
+  as sounding female, onyx was also disliked — echo is the current pick);
+  Transcriber: Soniox STT RT v5, background denoising on
+- All 11 tools created as Vapi Tool resources and attached via `model.toolIds`
 - End-of-call webhook and system prompt as documented above
 - Groq credential (own key, not Vapi's default integration — see "Bring-your-own
   Groq key" below): `0f4becb5-cdb4-43a2-bb45-d1a0fc574f45`
-- `startSpeakingPlan.waitSeconds: 1.5` (default 0.4, raised twice — 1.0 still
-  wasn't enough, a later live call still showed the agent cutting in and
-  repeating "could you tell me your vehicle type" three times while the
-  caller was mid-sentence) and `stopSpeakingPlan: {numWords: 3, voiceSeconds:
-  0.5, backoffSeconds: 1.5}` — gives the caller real room to finish a
-  sentence and requires more than a brief interjection to interrupt the agent
+- `startSpeakingPlan`: `waitSeconds` raised 0.4 → 1.0 → 1.5 → 2.0 across
+  several live calls that kept showing the agent interrupting a slow/
+  hesitant speaker (e.g. reading a ZIP code digit by digit with pauses) and
+  repeating itself. Plain `waitSeconds` turned out not to be the dominant
+  factor — `smartEndpointingPlan` (LiveKit's ML turn detector) and
+  `transcriptionEndpointingPlan` override it in practice. Now set to:
+  ```json
+  "startSpeakingPlan": {
+    "waitSeconds": 2,
+    "smartEndpointingPlan": {"provider": "livekit", "waitFunction": "200 + 8000 * x"},
+    "transcriptionEndpointingPlan": {"onPunctuationSeconds": 0.5, "onNoPunctuationSeconds": 2.5, "onNumberSeconds": 3}
+  }
+  ```
+  `onNumberSeconds` (capped at 3 by Vapi) specifically extends the pause
+  tolerance right after the caller says a digit — exactly the ZIP-code
+  digit-by-digit case that kept getting cut off. `stopSpeakingPlan:
+  {numWords: 3, voiceSeconds: 0.5, backoffSeconds: 1.5}` is unchanged —
+  requires more than a brief interjection to interrupt the agent.
 - `serverMessages: ["end-of-call-report"]` — was unset (Vapi's full default
   list), which POSTed every intermediate call event (conversation-update,
   status-update, etc.) to the call-ended webhook, flooding the admin Calls
@@ -463,8 +476,10 @@ same Groq BYOK credential (using the same key from `.env`):
   `e849dc4a-560b-4d15-95d7-e6c183a4b84e`, lookup_appointments
   `151bff68-6cf3-4a41-9397-6f03ff99f3e2`, reschedule_appointment
   `848a3753-bc25-4b65-99f6-22f4ac86b722`, cancel_appointment
-  `cc12423a-820b-4d22-a618-0133d437497a`
+  `cc12423a-820b-4d22-a618-0133d437497a`, resolve_date
+  `9c85cc18-1847-4b5a-9142-46f4af40df62`
 - Groq credential: `e01b5b15-942c-44ff-9822-7975cfa0370f`
+- Account 1's resolve_date tool ID: `53918ca3-1305-4217-addc-fbaa2e664c96`
 
 Both accounts point at the same backend (`API_BASE`/`VAPI_SECRET` unchanged)
 and the same database — a booking made through either number shows up in the
