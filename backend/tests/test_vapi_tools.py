@@ -248,3 +248,23 @@ def test_wrapped_call_ignores_spoofed_phone_uses_verified_caller_id(client, auth
     result = resp.json()["results"][0]["result"]
     # Found under the REAL caller's number, not the spoofed argument.
     assert result["count"] == 1
+
+
+def test_book_appointment_derives_state_from_zip_when_omitted(client, auth):
+    """The reported live-call problem: the caller only knew their ZIP, not the
+    state name, and the agent had no way to resolve it. state is now optional
+    on VoiceBookingCreate — derived server-side from zip_code."""
+    service_id = _service_id(client, auth)
+    payload = _book_payload(service_id, zip_code="21015")  # Bel Air, MD
+    del payload["state"]
+    resp = client.post("/api/vapi/book_appointment", json=payload)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "MD"
+
+
+def test_list_slots_derives_state_from_zip(client):
+    resp = client.post(
+        "/api/vapi/list_slots", json={"zip_code": "21015", "day": future(days=6, hour=0)}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["count"] > 0

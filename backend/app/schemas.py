@@ -44,7 +44,12 @@ class BookingCreate(BaseModel):
     customer_name: str = Field(min_length=1, max_length=255)
     customer_phone: str = Field(min_length=7, max_length=32)
     customer_email: EmailStr | None = None
-    state: str = Field(min_length=2, max_length=20, description="US state, name or 2-letter code")
+    state: str | None = Field(
+        default=None,
+        max_length=20,
+        description="US state, name or 2-letter code. Optional — derived from zip_code "
+        "server-side when omitted, so a caller never has to be asked separately.",
+    )
     zip_code: str = Field(pattern=ZIP_PATTERN, description="5-digit ZIP, or ZIP+4")
     starts_at: datetime
     service_id: str | None = None
@@ -77,7 +82,9 @@ class BookingCreate(BaseModel):
 
     @field_validator("state")
     @classmethod
-    def _validate_state(cls, v: str) -> str:
+    def _validate_state(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
         return normalize_state(v)
 
 

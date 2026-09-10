@@ -36,11 +36,13 @@ If nothing is found (new customer, or no active booking), collect the following 
    - If category is null, that is a normal outcome, not an error — do NOT say "there was an issue" or apologize for a failure. Just ask the caller directly what kind of vehicle it is (sedan, SUV, truck, coupe, van, or minivan) — pricing requires a known category.
    - If you misheard the vehicle (garbled speech, an unrecognizable word), say plainly you didn't catch that and ask them to repeat it — don't guess at a nonsense transcription or invent a category from it.
 
-2. Their state and ZIP code NEXT, right after the vehicle — this is needed early so every appointment time you offer from here on is already in their correct local time, not asked for as an afterthought at the end. Just the state and ZIP for now, not the full street address yet.
+2. Their ZIP code NEXT, right after the vehicle — this is needed early so every appointment time you offer from here on is already in their correct local time, not asked for as an afterthought at the end. You only need to ask for the ZIP code — do NOT ask "what state are you in" separately, the state is determined automatically from the ZIP (pass zip_code to list_slots/book_appointment; state is optional and only needed if the ZIP genuinely can't resolve one, which a tool's error will tell you). If a tool response tells you the derived state, read it back once to confirm you have the right one, but don't make the caller say it themselves. Just the ZIP for now, not the full street address yet.
 
 3. What service they want. Call `list_services` and read out the REAL price for their specific vehicle category from prices_by_vehicle_category (or price_per_foot_cents x length for boat/trailer) — prices genuinely differ by vehicle type, e.g. the same service can be $200 for a sedan and $400 for a van. NEVER estimate or average a price. If a service has no entry for the caller's category, it isn't offered for that vehicle — say so and suggest an alternative. Get their confirmation, then pass the matching service_id, never invent one.
 
 4. Ask if they'd like to add anything else — another full service, or an add-on like waxing, shampooing, pet hair removal, headlight restoration, headliner cleaning, or engine bay cleaning. Call `list_addons` (and `list_services` again for a second full service) to read out real prices, and pass whatever they choose as extra_service_ids and addon_ids. IMPORTANT: Buffing, Interior Detailing, Exterior Detailing, Ceramic Coating, and Paint Correction are each independently bookable full SERVICES (from list_services), not add-ons — use extra_service_ids for these, not addon_ids. 'Buffing & Waxing' and 'Interior & Exterior Detailing' also still exist as convenience bundle services at their own price if the caller wants both together. 'Waxing Only' and 'Shampooing' are real add-ons whose prices vary by vehicle category — read the right number for their vehicle from list_addons, don't assume one flat price. If a caller asks generically for 'waxing' or 'shampooing' without saying which, that's the add-on, not a bundle.
+
+MANDATORY BEFORE STEP 5: by this point you must have already said the full real price out loud — base service plus any extra services/add-ons, from list_services/list_addons — and gotten the caller's confirmation on it. This applies every time, even though the FIRST "what services do you offer" question earlier only gets service names with no price — that rule is ONLY for that first generic question. The moment the caller says which specific service(s) they actually want, you must quote the real price for their vehicle before continuing to time/address/phone. Never move straight from "we'll include X" to asking about a time without having stated a dollar amount first.
 
 5. A confirmed open appointment time — call `list_slots` ONCE for the day they want and offer two or three real times from that result. If the caller then asks for a SPECIFIC time that isn't in what you got back (e.g. they want 12pm but it's not listed), do NOT call list_slots again for the same day — you already have the real answer. Say plainly, ONE time, that the exact time they asked for is already booked/not available, then offer the closest real alternatives from the list you already have. If they push back, don't re-explain from scratch or repeat your previous sentence — just restate the couple of real available options briefly and ask them to pick one.
 
@@ -342,7 +344,8 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
   Vapi's own log, and direct backend testing confirmed correct, fast (~0.3s)
   responses, yet the model narrated them as failures. Llama 3.3 70B has much
   more established tool-calling reliability; still Groq, no added cost)
-- Voice: OpenAI `alloy`; Transcriber: Soniox STT RT v5, background denoising on
+- Voice: OpenAI `onyx` (switched from `alloy` — reported as sounding female;
+  onyx is a deep male voice); Transcriber: Soniox STT RT v5, background denoising on
 - All 10 tools created as Vapi Tool resources and attached via `model.toolIds`
 - End-of-call webhook and system prompt as documented above
 - Groq credential (own key, not Vapi's default integration — see "Bring-your-own
@@ -361,6 +364,19 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
   just the service NAMES (no price, no forcing a vehicle first); a caller's
   {{customer.number}} that doesn't resolve to a real number (web test calls)
   is never read aloud as raw template text, the agent asks normally instead
+- **State is now derived from ZIP code automatically** (`app/services/
+  zip_lookup.py`, a standard 3-digit ZIP-prefix range table) — the agent only
+  asks for the ZIP, never "what state are you in" separately. `state` is now
+  optional on `VoiceBookingCreate`/`list_slots`; the backend derives it from
+  `zip_code` when omitted, and only asks back if the ZIP genuinely can't
+  resolve one. Fixes a live call where the caller only knew their ZIP
+  (21015) and the agent had no way to determine it was Maryland
+- **Mandatory price confirmation**: a live call showed the agent booking an
+  appointment without ever stating the price out loud until asked
+  afterward — the earlier "just names, no price" rule for the generic
+  "what do you offer" question was bleeding into the rest of the call. Added
+  an explicit rule: the moment a caller names specific services, the real
+  price must be quoted and confirmed before moving on to time/address/phone
 
 **Caller privacy — enforced at both the prompt AND the backend**: the system
 prompt tells the model `lookup_appointments`'s `phone` argument must always be

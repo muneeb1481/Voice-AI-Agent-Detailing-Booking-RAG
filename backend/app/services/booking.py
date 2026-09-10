@@ -23,6 +23,7 @@ from app.models import (
 from app.schemas import BookingCreate, ParsedBookingCreate, SlotOut
 from app.services.timezones import timezone_for_state
 from app.services.vehicle import classify_vehicle_smart, is_length_based
+from app.services.zip_lookup import state_from_zip
 
 BUSINESS_OPEN = time(8, 0)
 BUSINESS_CLOSE = time(18, 0)
@@ -256,6 +257,12 @@ def _apply_discount(
 
 def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -> Booking:
     start = _as_utc(payload.starts_at)
+    state = payload.state or state_from_zip(payload.zip_code)
+    if state is None:
+        raise _bad_request(
+            "We need to know what state this is in — ask the caller directly, we "
+            "couldn't determine it from the ZIP code alone."
+        )
 
     duration = payload.duration_minutes
     service = None
@@ -276,9 +283,9 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
     duration += extras_duration
 
     end = start + timedelta(minutes=duration)
-    validate_window(payload.state, start, end)
+    validate_window(state, start, end)
 
-    if _overlaps(db, payload.state, start, end):
+    if _overlaps(db, state, start, end):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="That slot is already taken. Offer the caller another time.",
@@ -313,7 +320,7 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
     booking = Booking(
         customer_id=customer.id,
         service_id=service.id if service else None,
-        state=payload.state,
+        state=state,
         zip_code=payload.zip_code,
         detailer=payload.detailer,
         vehicle=payload.vehicle,
@@ -371,7 +378,7 @@ def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
     booking = Booking(
         customer_id=customer.id,
         service_id=None,
-        state=payload.state,
+        state=payload.state or state_from_zip(payload.zip_code),
         zip_code=payload.zip_code,
         detailer=payload.detailer,
         vehicle=payload.vehicle,

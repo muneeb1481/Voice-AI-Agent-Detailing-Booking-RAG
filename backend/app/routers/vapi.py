@@ -34,6 +34,7 @@ from app.services.timezones import period_and_closing_line
 from app.services.us_states import normalize_state
 from app.services import rag
 from app.services.vapi_protocol import parse_tool_call, parse_tool_call_full, tool_response
+from app.services.zip_lookup import state_from_zip
 
 settings = get_settings()
 router = APIRouter(prefix="/api/vapi", tags=["vapi"])
@@ -99,13 +100,22 @@ async def ask(request: Request, db: Session = Depends(get_db)):
 
 
 class ListSlotsArgs(BaseModel):
-    state: str = Field(description="US state, name or 2-letter code")
+    state: str | None = Field(
+        default=None,
+        description="US state, name or 2-letter code. Optional if zip_code is given — "
+        "state is derived from the ZIP automatically.",
+    )
+    zip_code: str | None = Field(
+        default=None, description="5-digit ZIP — used to derive state if state isn't given."
+    )
     day: datetime
     duration_minutes: int = Field(default=90, ge=15, le=600)
 
     @field_validator("state")
     @classmethod
-    def _validate_state(cls, v: str) -> str:
+    def _validate_state(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
         return normalize_state(v)
 
 
@@ -116,7 +126,17 @@ async def list_slots(request: Request, db: Session = Depends(get_db)):
     if early is not None:
         return early
 
-    slots = booking_service.list_slots(db, args.state, args.day, args.duration_minutes)
+    state = args.state or state_from_zip(args.zip_code)
+    if state is None:
+        message = (
+            "We need to know what state this is in — ask the caller directly, we "
+            "couldn't determine it from the ZIP code alone."
+        )
+        if tool_call_id is None:
+            raise HTTPException(status_code=400, detail=message)
+        return tool_response(message, tool_call_id)
+
+    slots = booking_service.list_slots(db, state, args.day, args.duration_minutes)
     result = {
         "count": len(slots),
         "slots": [s.starts_at.isoformat() for s in slots[:8]],
