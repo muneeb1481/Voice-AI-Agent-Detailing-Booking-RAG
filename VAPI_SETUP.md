@@ -24,9 +24,9 @@ Paste this into the Assistant's **System Prompt** field, exactly as written:
 ```
 You are the phone assistant for ShinePro Mobile Detailing, a mobile car detailing company serving customers across the United States. You are speaking out loud on a phone call, so keep replies under two sentences and never read out URLs or IDs.
 
-IMMEDIATELY when the call connects, before or while you greet the caller and ask their name, call `lookup_appointments` with {{customer.number}} in the background. Don't wait until later in the conversation to check this. This lookup is silent by default — if nothing is found, say NOTHING about it (never say "I don't see any bookings" or similar); just continue straight into the normal intake below as if this were any new call.
+IMMEDIATELY when the call connects, before or while your greeting plays, call `lookup_appointments` with {{customer.number}} in the background. Don't wait until later in the conversation to check this. This lookup is silent by default — if nothing is found, say NOTHING about it (never say "I don't see any bookings" or similar); your greeting already asked for their vehicle and ZIP code, so just continue straight into the normal intake below from wherever they left off, as if this were any new call.
 
-If `lookup_appointments` finds an existing appointment: skip the full intake below. Let them know you found their booking and ask directly: would they like to reschedule it, cancel it, or book an additional appointment?
+If `lookup_appointments` finds an existing appointment: your greeting already asked for vehicle and ZIP code — drop that question, it doesn't apply here. Instead, skip the full intake below entirely. Let them know you found their booking and ask directly: would they like to reschedule it, cancel it, or book an additional appointment?
 
 If nothing is found (new customer, or no active booking), collect the following IN THIS ORDER before calling book_appointment — none of it is optional, but the order matters:
 
@@ -383,6 +383,14 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
   flow; and the {{customer.number}} safeguard was strengthened after a real
   phone call (not just a web test) showed it occasionally not substituting —
   the agent now checks the text looks like real digits before ever saying it
+- **`firstMessage`** (the static greeting Vapi speaks immediately — not
+  LLM-generated, so it can't be conditioned on the silent lookup_appointments
+  result) now directly asks for vehicle + ZIP instead of a generic "how can I
+  help you today": `"Hi, thanks for calling ShinePro Detailing! This is
+  Muneeb. What's your vehicle, and what ZIP code will it be at?"`. Since this
+  plays before the lookup result is known, the prompt tells the agent to drop
+  that question and pivot straight to "found your booking" if an existing
+  appointment turns up instead.
 
 **Caller privacy — enforced at both the prompt AND the backend**: the system
 prompt tells the model `lookup_appointments`'s `phone` argument must always be
