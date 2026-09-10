@@ -16,6 +16,45 @@ _WEEKDAYS = {
     "friday": 4, "saturday": 5, "sunday": 6,
 }
 
+_MONTHS = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9, "october": 10,
+    "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
+}
+_MONTH_NAMES = "|".join(_MONTHS)
+
+
+def _resolve_month_day(text: str, today: date) -> date | None:
+    """"12 September", "September 12", "Sept 12th" — an explicit calendar date
+    the caller stated outright, not a relative phrase. Resolves to this year
+    unless that date has already passed, in which case next year."""
+    m = re.search(
+        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(" + _MONTH_NAMES + r")\b", text
+    )
+    if m:
+        day_num, month_name = int(m.group(1)), m.group(2)
+    else:
+        m = re.search(
+            r"\b(" + _MONTH_NAMES + r")\s+(\d{1,2})(?:st|nd|rd|th)?\b", text
+        )
+        if not m:
+            return None
+        month_name, day_num = m.group(1), int(m.group(2))
+
+    month = _MONTHS[month_name]
+    year = today.year
+    try:
+        candidate = date(year, month, day_num)
+    except ValueError:
+        return None  # e.g. "February 30" — not a real date, don't guess
+    if candidate < today:
+        try:
+            candidate = date(year + 1, month, day_num)
+        except ValueError:
+            return None
+    return candidate
+
 
 def resolve_relative_date(phrase: str, state: str | None) -> date | None:
     """Returns the resolved calendar date in the caller's local timezone, or
@@ -48,5 +87,9 @@ def resolve_relative_date(phrase: str, state: str | None) -> date | None:
     m = re.search(r"\bin\s+(\d+)\s+days?\b", text)
     if m:
         return today + timedelta(days=int(m.group(1)))
+
+    month_day = _resolve_month_day(text, today)
+    if month_day is not None:
+        return month_day
 
     return None

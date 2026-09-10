@@ -455,6 +455,27 @@ then set the returned `id` in the assistant's top-level (not nested under
 `model`) `credentialIds: ["<that id>"]`. Both live assistants below have
 this wired to a real Groq key already in `backend/.env`.
 
+**IMPORTANT — `PATCH /tool/{id}` does a full replace, not a merge.** This
+bit us for real: updating a Tool's `function` schema (e.g. adding an
+optional `zip_code` parameter) by sending `{"function": {...}}` alone
+silently wiped that tool's `server` field entirely — no error, no warning,
+the PATCH just "succeeds" with the tool now missing its webhook URL. The
+practical symptom was brutal to trace: `list_slots` and `book_appointment`
+appeared to run ("Completed successfully" in Vapi's own call log) but
+Vapi's actual response was its generic `"No result returned"` — because
+with no `server.url` configured, Vapi had nowhere to send the request at
+all, and returned that placeholder text fast (under a second) instead of
+timing out slowly, which is what made it look like a backend crash rather
+than a missing webhook. Two live calls in a row showed the agent
+confidently claiming "no availability" for real, open days before this was
+found and fixed. **Every `PATCH /tool/{id}` call must include the FULL
+tool body — `function` AND `server` together — never just the part being
+changed.** Verify after any tool update:
+```
+GET https://api.vapi.ai/tool
+```
+and check every tool object has a `server` key.
+
 ---
 
 ## Second account (2026-09-09)
