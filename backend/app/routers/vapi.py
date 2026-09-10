@@ -99,6 +99,45 @@ async def ask(request: Request, db: Session = Depends(get_db)):
     return tool_response(result.model_dump(), tool_call_id)
 
 
+class ResolveDateArgs(BaseModel):
+    phrase: str = Field(
+        min_length=1,
+        description="The relative day the caller said, e.g. 'Friday', 'tomorrow', "
+        "'next Monday', 'in 3 days'.",
+    )
+    state: str | None = Field(
+        default=None, description="US state, if known — for the caller's correct local 'today'."
+    )
+    zip_code: str | None = Field(
+        default=None, description="5-digit ZIP — used to derive state if state isn't given."
+    )
+
+
+@router.post("/resolve_date", dependencies=[Depends(verify_vapi)])
+async def resolve_date(request: Request):
+    """Turn a relative day the caller said into a real calendar date — never do
+    this math yourself, it's easy to get wrong. Call this whenever the caller
+    mentions a day in relative terms (today, tomorrow, a weekday name, "next
+    week", "in N days") before calling list_slots or book_appointment."""
+    from app.services.date_resolve import resolve_relative_date  # noqa: PLC0415
+
+    args_dict, tool_call_id = await parse_tool_call(request)
+    args, early = _validated(ResolveDateArgs, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
+    state = args.state or state_from_zip(args.zip_code)
+    resolved = resolve_relative_date(args.phrase, state)
+    if resolved is None:
+        result = (
+            f"Could not resolve '{args.phrase}' to a specific date — ask the caller to "
+            "state the actual date or day of the week plainly."
+        )
+    else:
+        result = {"date": resolved.isoformat(), "day_of_week": resolved.strftime("%A")}
+    return tool_response(result, tool_call_id)
+
+
 class ListSlotsArgs(BaseModel):
     state: str | None = Field(
         default=None,

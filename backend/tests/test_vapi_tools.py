@@ -268,3 +268,34 @@ def test_list_slots_derives_state_from_zip(client):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["count"] > 0
+
+
+def test_resolve_date_tool_weekday(client):
+    resp = client.post("/api/vapi/resolve_date", json={"phrase": "Friday", "state": "TN"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["day_of_week"] == "Friday"
+
+
+def test_resolve_date_tool_derives_state_from_zip(client):
+    resp = client.post(
+        "/api/vapi/resolve_date", json={"phrase": "tomorrow", "zip_code": "55425"}
+    )
+    assert resp.status_code == 200
+    assert "date" in resp.json()
+
+
+def test_resolve_date_then_list_slots_matches_reported_bug(client):
+    """The actual reported bug: three consecutive real days (Fri/Sat/Sun) each
+    showed 'no slots available' on a live call, even though the backend genuinely
+    had open slots on all three — caused by the LLM computing the wrong absolute
+    date itself. resolve_date removes that step entirely."""
+    for phrase in ["friday", "saturday", "sunday"]:
+        resolved = client.post(
+            "/api/vapi/resolve_date", json={"phrase": phrase, "state": "MN"}
+        ).json()
+        slots = client.post(
+            "/api/vapi/list_slots",
+            json={"state": "MN", "day": f"{resolved['date']}T00:00:00Z"},
+        ).json()
+        assert slots["count"] > 0, f"{phrase} ({resolved['date']}) unexpectedly had no slots"
