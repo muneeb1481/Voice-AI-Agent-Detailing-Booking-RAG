@@ -169,3 +169,65 @@ def test_booking_a_motorcycle_against_a_car_only_service_is_rejected(client, aut
     )
     assert resp.status_code == 400
     assert "motorcycle" in resp.json()["detail"].lower()
+
+
+def test_call_ended_webhook_ignores_non_end_of_call_message_types(client, auth):
+    """Vapi's serverMessages can include many intermediate event types
+    (conversation-update, status-update, speech-update, etc.) if an assistant
+    isn't restricted to just end-of-call-report. This must never persist a row
+    for any of those — only a genuine end-of-call-report — otherwise one real
+    call floods the admin Calls page with dozens of near-empty duplicate rows."""
+    for bad_type in ["conversation-update", "status-update", "speech-update", "tool-calls"]:
+        resp = client.post(
+            "/api/vapi/call-ended",
+            json={"message": {"type": bad_type, "call": {"id": "call_flood_test"}}},
+        )
+        assert resp.status_code == 200
+
+    calls = client.get("/api/call-transcripts", headers=auth).json()
+    assert not any(c["call_id"] == "call_flood_test" for c in calls)
+
+    resp = client.post(
+        "/api/vapi/call-ended",
+        json={
+            "message": {
+                "type": "end-of-call-report",
+                "call": {"id": "call_flood_test", "endedReason": "customer-ended-call"},
+                "durationSeconds": 60,
+            }
+        },
+    )
+    assert resp.status_code == 200
+    calls = client.get("/api/call-transcripts", headers=auth).json()
+    assert sum(1 for c in calls if c["call_id"] == "call_flood_test") == 1
+
+
+def test_call_ended_webhook_upserts_by_call_id_not_duplicated(client, auth):
+    """Vapi has been observed sending end-of-call-report twice for the same
+    call (a preliminary one, then a final one with durationSeconds filled in)
+    — this must update the same row, not create a second one."""
+    preliminary = {
+        "message": {
+            "type": "end-of-call-report",
+            "call": {"id": "call_upsert_test", "endedReason": "customer-ended-call"},
+            "customer": {"number": "+16465550300"},
+        }
+    }
+    final = {
+        "message": {
+            "type": "end-of-call-report",
+            "call": {"id": "call_upsert_test", "endedReason": "customer-ended-call"},
+            "customer": {"number": "+16465550300"},
+            "transcript": "AI: hi\nUser: bye",
+            "analysis": {"summary": "Short test call."},
+            "durationSeconds": 45,
+        }
+    }
+    client.post("/api/vapi/call-ended", json=preliminary)
+    client.post("/api/vapi/call-ended", json=final)
+
+    calls = client.get("/api/call-transcripts", headers=auth).json()
+    matching = [c for c in calls if c["call_id"] == "call_upsert_test"]
+    assert len(matching) == 1
+    assert matching[0]["duration_seconds"] == 45
+    assert matching[0]["summary"] == "Short test call."

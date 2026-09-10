@@ -412,11 +412,23 @@ async def call_ended(request: Request, db: Session = Depends(get_db)) -> dict:
     (with the same X-Vapi-Secret header) so every finished call is saved here for
     an admin to review — not just what got booked, but how the conversation went.
 
-    Payload shape isn't hard-relied on: best-effort field extraction, but the full
-    raw body is always stored, so nothing is lost even if a field path is off.
+    The assistant's serverMessages is restricted to ["end-of-call-report"] so
+    this only ever fires once per call, but that's assistant-side config, not a
+    guarantee — this handler also checks the message type itself and silently
+    no-ops on anything else, so a misconfigured assistant (every other server
+    message type: conversation-update, status-update, speech-update, etc.) can
+    never flood this table with one near-empty row per turn again.
+
+    Payload shape isn't hard-relied on beyond that type check: best-effort field
+    extraction, but the full raw body is always stored, so nothing is lost even
+    if a field path is off.
     """
     body = await request.json()
     message = body.get("message", body)  # some Vapi setups nest under "message", some don't
+
+    message_type = message.get("type")
+    if message_type is not None and message_type != "end-of-call-report":
+        return {"ok": True}
 
     call = message.get("call", {}) or {}
     customer = message.get("customer", {}) or call.get("customer", {}) or {}
@@ -432,17 +444,30 @@ async def call_ended(request: Request, db: Session = Depends(get_db)) -> dict:
                 if isinstance(m, dict)
             )
 
-    db.add(
-        CallTranscript(
-            call_id=call.get("id") or message.get("callId"),
-            phone=customer.get("number"),
-            customer_name=customer.get("name"),
-            transcript=transcript,
-            summary=analysis.get("summary") or message.get("summary"),
-            ended_reason=call.get("endedReason") or message.get("endedReason"),
-            duration_seconds=message.get("durationSeconds"),
-            raw_payload=body,
-        )
+    call_id = call.get("id") or message.get("callId")
+    fields = dict(
+        phone=customer.get("number"),
+        customer_name=customer.get("name"),
+        transcript=transcript,
+        summary=analysis.get("summary") or message.get("summary"),
+        ended_reason=call.get("endedReason") or message.get("endedReason"),
+        duration_seconds=message.get("durationSeconds"),
+        raw_payload=body,
     )
+
+    # Vapi has been observed sending end-of-call-report twice per call (a
+    # preliminary one, then a final one with durationSeconds/summary filled
+    # in) — upsert by call_id instead of always inserting, so the admin Calls
+    # page shows one row per call, not two.
+    existing = (
+        db.execute(select(CallTranscript).where(CallTranscript.call_id == call_id)).scalar_one_or_none()
+        if call_id
+        else None
+    )
+    if existing is not None:
+        for key, value in fields.items():
+            setattr(existing, key, value)
+    else:
+        db.add(CallTranscript(call_id=call_id, **fields))
     db.commit()
     return {"ok": True}
