@@ -422,11 +422,11 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
 - **`firstMessage`** (the static greeting Vapi speaks immediately — not
   LLM-generated, so it can't be conditioned on the silent lookup_appointments
   result) now directly asks for vehicle + ZIP instead of a generic "how can I
-  help you today": `"Hi, thanks for calling ShinePro Detailing! This is
-  Muneeb. What's your vehicle, and what ZIP code will it be at?"`. Since this
-  plays before the lookup result is known, the prompt tells the agent to drop
-  that question and pivot straight to "found your booking" if an existing
-  appointment turns up instead.
+  help you today", simplified once more to plain wording: `"Hi, thanks for
+  calling ShinePro Detailing! This is Muneeb. What's your car model and zip
+  code?"`. Since this plays before the lookup result is known, the prompt
+  tells the agent to drop that question and pivot straight to "found your
+  booking" if an existing appointment turns up instead.
 
 **Caller privacy — enforced at both the prompt AND the backend**: the system
 prompt tells the model `lookup_appointments`'s `phone` argument must always be
