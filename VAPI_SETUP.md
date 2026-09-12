@@ -387,9 +387,14 @@ Configured end-to-end via Vapi's API (not just this doc — the actual live assi
   "startSpeakingPlan": {
     "waitSeconds": 2,
     "smartEndpointingPlan": {"provider": "livekit", "waitFunction": "200 + 8000 * x"},
-    "transcriptionEndpointingPlan": {"onPunctuationSeconds": 0.5, "onNoPunctuationSeconds": 2.5, "onNumberSeconds": 3}
+    "transcriptionEndpointingPlan": {"onPunctuationSeconds": 0.5, "onNoPunctuationSeconds": 1.3, "onNumberSeconds": 3}
   }
   ```
+  (`onNoPunctuationSeconds` tightened 2.5 → 1.3 on 2026-09-12 across all
+  three accounts — this is the pause after a short, unpunctuated answer like
+  "interior", identified as the source of bug 1.2's perceived ~1s dead air.
+  `onNumberSeconds` is untouched, so the ZIP-digit pause tolerance below is
+  unaffected.)
   `onNumberSeconds` (capped at 3 by Vapi) specifically extends the pause
   tolerance right after the caller says a digit — exactly the ZIP-code
   digit-by-digit case that kept getting cut off. `stopSpeakingPlan:
@@ -512,3 +517,47 @@ same Groq BYOK credential (using the same key from `.env`):
 Both accounts point at the same backend (`API_BASE`/`VAPI_SECRET` unchanged)
 and the same database — a booking made through either number shows up in the
 same admin dashboard.
+
+---
+
+## Third account (2026-09-12)
+
+A third org, set up from scratch — same tool set, model/voice/transcriber/
+speaking-plan tuning, and system prompt as accounts 1 and 2, built to include
+every fix from the "fix + new pricing logic" spec (ZIP-not-mandatory,
+condition-driven pricing rules, tightened `onNoPunctuationSeconds`) from day
+one instead of retrofitting it:
+
+- Assistant: `ShinePro Detailing` (id `583c236b-a43e-4991-a0d5-8e3c4d4109e5`,
+  orgId `465e46b5-e362-4676-bdf1-805c3450f29c`)
+- Phone number: `+1 (901) 592-2239` (Vapi free number, area code 901 to match
+  the other two lines)
+- Tool IDs (org-scoped, distinct from accounts 1/2): ask
+  `863d8b85-cac6-4308-a242-def93f1f5524`, list_slots
+  `0ea47771-12e8-4d2a-a202-a47934d51f57`, classify_vehicle
+  `da61e818-d463-451f-b669-bf26ca9c53f3`, list_services
+  `25b0d6eb-a935-4382-a1ea-5d0b0210a171`, list_addons
+  `bd581329-355d-4b18-bfb8-ff36e7044bf2`, current_time
+  `4791f0b9-1ebd-45fa-a58c-48c6456bfa02`, book_appointment
+  `afe0c5f6-c813-4019-83a9-cb7cc6543155`, lookup_appointments
+  `69c94e20-0cd4-4682-896a-3b31d57453af`, reschedule_appointment
+  `24d79e78-3b19-4388-92bf-029e43faa135`, cancel_appointment
+  `75e38a3a-a896-4a26-9b57-581927de0207`, resolve_date
+  `2b548421-47f7-4610-9967-e33f01e197fb`
+- Groq credential (own key, same key as the other two accounts):
+  `63de9dd3-5b40-4125-8740-6967e44db80f`
+
+Note on the "base assistant to clone" originally given for this account:
+that value turned out to be this account's own **Private API Key**, not an
+assistant ID — the account itself
+was brand new, containing only Vapi's default blank template and its demo
+"Riley" (Wellness Partners) assistant, neither of which is ShinePro-related.
+There was nothing to actually clone from on this account; it was built to
+match accounts 1/2 instead, which serve as the real reference implementation.
+
+All three accounts now share: the same tightened `onNoPunctuationSeconds`
+(2.5s → 1.3s, addresses bug 1.2's dead-air complaint after short answers
+like "interior" — `onNumberSeconds` stays at 3s, unaffected, so ZIP-digit
+pause tolerance is unchanged), and the same rewritten system prompt covering
+ZIP-not-mandatory location handling and the full service-detection/pricing
+logic (see "System Prompt" above).
