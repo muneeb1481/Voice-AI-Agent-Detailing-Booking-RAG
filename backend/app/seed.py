@@ -110,6 +110,12 @@ DEFAULT_ADDONS = [
     ("Headlight Restoration", 45, 10000, None),
     ("Headliner Cleaning", 45, 5000, None),
     ("Engine Bay Cleaning", 30, 7000, None),
+    # Only added when the CALLER describes the condition as tough/permanent/
+    # heavily soiled — never a default. A flat surcharge, same for every
+    # vehicle category, reusing the existing add-on mechanism rather than a
+    # new pricing concept — it can only be booked alongside a base service,
+    # same as every other add-on (never sold standalone).
+    ("Tough Stain / Heavy Soil Surcharge", 15, 10000, None),
 ]
 
 # Waxing Only: $70 for sedan/SUV/truck/coupe, $100 for van/minivan. Floor is $50
