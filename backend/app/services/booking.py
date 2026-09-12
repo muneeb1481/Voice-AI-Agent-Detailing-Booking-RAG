@@ -288,7 +288,12 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
     if _overlaps(db, state, start, end):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="That slot is already taken. Offer the caller another time.",
+            detail=(
+                "That slot is already taken — no booking was created. Call list_slots "
+                "again for this day to see real availability, never invent a time "
+                "yourself. Once the caller agrees to a real available time, call "
+                "book_appointment again with it — this attempt did not book anything."
+            ),
         )
 
     subtotal = base_price + extras_price
