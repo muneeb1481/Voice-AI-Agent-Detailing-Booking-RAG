@@ -308,12 +308,38 @@ async def classify_vehicle_endpoint(request: Request):
     return tool_response(payload.model_dump(), tool_call_id)
 
 
+def _looks_like_unresolved_phone_template(phone: str) -> bool:
+    """Vapi's {{customer.number}} template is only ever unresolved on a
+    dashboard Talk/web-test call (no real caller ID to fill in) — a real phone
+    call always substitutes real digits first. If the model still passed the
+    literal placeholder text through, never save it as a customer's phone
+    number."""
+    lowered = phone.strip().lower()
+    return "customer.number" in lowered or lowered in {"customer", "number", ""}
+
+
 @router.post("/book_appointment", dependencies=[Depends(verify_vapi)])
 async def book_appointment(request: Request, db: Session = Depends(get_db)):
-    args_dict, tool_call_id = await parse_tool_call(request)
+    args_dict, tool_call_id, verified_number = await parse_tool_call_full(request)
     args, early = _validated(VoiceBookingCreate, args_dict, tool_call_id)
     if early is not None:
         return early
+
+    # Defense-in-depth beyond the system-prompt rule (same pattern as
+    # lookup_appointments): on a real call, always trust Vapi's own verified
+    # caller ID over whatever phone number string the LLM supplied.
+    if verified_number:
+        args.customer_phone = verified_number
+    elif _looks_like_unresolved_phone_template(args.customer_phone):
+        message = (
+            "The phone number you were about to use is just placeholder text, not a "
+            "real number — this happens on web test calls with no caller ID. Ask the "
+            "caller directly for their phone number, then call book_appointment again "
+            "with the real digits."
+        )
+        if tool_call_id is None:
+            raise HTTPException(status_code=400, detail=message)
+        return tool_response(message, tool_call_id)
 
     try:
         booking = booking_service.create_booking(db, args, source="voice")

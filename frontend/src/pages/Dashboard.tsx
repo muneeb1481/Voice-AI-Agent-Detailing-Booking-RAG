@@ -183,9 +183,9 @@ export function Dashboard() {
               {upcoming.map((b) => (
                 <li key={b.id} className="flex items-center gap-4 px-5 py-3">
                   <div className="w-20 shrink-0">
-                    <p className="text-xs font-medium">{formatDate(b.starts_at)}</p>
+                    <p className="text-xs font-medium">{formatDate(b.starts_at, b.state)}</p>
                     <p className="text-[11px] text-muted tabular-nums">
-                      {formatTime(b.starts_at)}
+                      {formatTime(b.starts_at, b.state)}
                     </p>
                   </div>
                   <div className="min-w-0 flex-1">

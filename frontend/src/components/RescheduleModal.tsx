@@ -63,7 +63,7 @@ export function RescheduleModal({ booking, onClose, onDone }: Props) {
       title="Reschedule appointment"
       description={
         booking
-          ? `${booking.customer.name}${booking.state ? ` · ${booking.state}` : ''} · currently ${formatTime(booking.starts_at)}`
+          ? `${booking.customer.name}${booking.state ? ` · ${booking.state}` : ''} · currently ${formatTime(booking.starts_at, booking.state)}`
           : undefined
       }
       footer={
@@ -111,7 +111,7 @@ export function RescheduleModal({ booking, onClose, onDone }: Props) {
                       : 'border-token text-muted hover:border-[rgb(var(--accent))] hover:text-fg',
                   )}
                 >
-                  {formatTime(s.starts_at)}
+                  {formatTime(s.starts_at, booking?.state)}
                 </button>
               ))}
             </div>
