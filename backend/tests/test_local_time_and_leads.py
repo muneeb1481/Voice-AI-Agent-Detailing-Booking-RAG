@@ -382,3 +382,43 @@ def test_garbled_spoken_phone_is_refused_and_valid_one_normalized(client, auth):
         "book_appointment", {**args, "customer_phone": "(653) 219-7894"}, number=None)))
     assert "booking_id" in booked
     assert client.get("/api/bookings", headers=auth).json()[0]["customer"]["phone"] == "+16532197894"
+
+
+def test_state_from_place_handles_how_callers_say_it():
+    from app.services.us_states import state_from_place
+
+    assert state_from_place("Dallas") == "TX"
+    assert state_from_place("DALLAS") == "TX"
+    assert state_from_place("San Antonio, Texas") == "TX"
+    assert state_from_place("I live in Baltimore") == "MD"
+    assert state_from_place("Chicago") == "IL"
+    assert state_from_place("Kansas City") == "MO"
+    assert state_from_place("Plano, TX") == "TX"
+    assert state_from_place("Texas") == "TX"
+    assert state_from_place("Toyota Aqua") is None
+    assert state_from_place("I live in") is None
+
+
+def test_city_location_books_without_zip_replay(client, auth):
+    """Live call: agent passed zip_code="Toyota Aqua" and the ZIP pattern failed the
+    booking; the caller had said Texas/Dallas. A city or state is enough."""
+    service_id = _service_id(client, auth)
+    base = {
+        "date": _day(), "time": "10 AM", "service_id": service_id, "vehicle": "Toyota Corolla",
+        "customer_name": "Pretty Alex", "address": "House 50, Street 14",
+    }
+    booked = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", {**base, "zip_code": "Toyota Aqua", "state": "Texas"})))
+    assert "booking_id" in booked and booked["state"] == "TX"
+
+    by_city = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", {**base, "time": "1 PM", "state": "Dallas"})))
+    assert by_city["state"] == "TX"
+
+    slots = _result(client.post("/api/vapi/list_slots", json=_wrapped(
+        "list_slots", {"state": "Dallas", "day": _day(), "time": "3 PM"})))
+    assert slots["requested_time_available"] in (True, False)
+
+    no_location = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", {**base, "time": "2 PM", "zip_code": "Toyota Aqua"})))
+    assert isinstance(no_location, str) and "state" in no_location.lower()

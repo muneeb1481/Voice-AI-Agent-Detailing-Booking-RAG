@@ -39,7 +39,7 @@ from app.services.timezones import (
     reinterpret_as_wall_clock,
     to_local,
 )
-from app.services.us_states import normalize_state
+from app.services.us_states import normalize_state, state_from_place
 from app.services import rag
 from app.services.vapi_protocol import SafeToolRoute, parse_tool_call, parse_tool_call_full, tool_response
 from app.services.zip_lookup import state_from_zip
@@ -120,6 +120,13 @@ class ResolveDateArgs(BaseModel):
         default=None, description="5-digit ZIP — used to derive state if state isn't given."
     )
 
+    @field_validator("state")
+    @classmethod
+    def _validate_state(cls, v: str | None) -> str | None:
+        # "Texas" used to reach timezone_for_state unnormalized and silently fall
+        # back to Eastern time for the caller's "today".
+        return state_from_place(v)
+
 
 @router.post("/resolve_date", dependencies=[Depends(verify_vapi)])
 async def resolve_date(request: Request):
@@ -134,7 +141,7 @@ async def resolve_date(request: Request):
     if early is not None:
         return early
 
-    state = args.state or state_from_zip(args.zip_code)
+    state = args.state or state_from_zip(args.zip_code) or state_from_place(args.zip_code)
     resolved = resolve_relative_date(args.phrase, state)
     if resolved is None:
         result = (
@@ -164,9 +171,7 @@ class ListSlotsArgs(BaseModel):
     @field_validator("state")
     @classmethod
     def _validate_state(cls, v: str | None) -> str | None:
-        if v is None or not v.strip():
-            return None
-        return normalize_state(v)
+        return state_from_place(v)  # "TX", "Texas", or a city like "Dallas"
 
 
 def _state_unknown(tool_call_id: str | None):
@@ -192,7 +197,7 @@ async def list_slots(request: Request, db: Session = Depends(get_db)):
     if early is not None:
         return early
 
-    state = args.state or state_from_zip(args.zip_code)
+    state = args.state or state_from_zip(args.zip_code) or state_from_place(args.zip_code)
     if state is None:
         return _state_unknown(tool_call_id)
 
@@ -497,7 +502,7 @@ async def book_appointment(request: Request, db: Session = Depends(get_db)):
     if early is not None:
         return early
 
-    state = args.state or state_from_zip(args.zip_code)
+    state = args.state or state_from_zip(args.zip_code) or state_from_place(args.zip_code)
     if state is None:
         return _state_unknown(tool_call_id)
     # The time the agent passes is always the caller's local wall clock.

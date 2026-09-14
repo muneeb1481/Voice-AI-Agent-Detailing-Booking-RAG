@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+import re
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.models import BookingStatus
-from app.services.us_states import normalize_state
+from app.services.us_states import normalize_state, state_from_place
 
 ZIP_PATTERN = r"^\d{5}(-\d{4})?$"
 
@@ -100,6 +102,31 @@ class VoiceBookingCreate(BookingCreate):
     lead_id: str | None = Field(
         default=None, description="From save_lead — this booking confirms that pending lead."
     )
+    zip_code: str | None = Field(default=None, description="5-digit ZIP, only if the caller gave one")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_location(cls, data):
+        """The location only has to identify the state. A live call put the car model
+        ("Toyota Aqua") in zip_code, the ZIP pattern failed the whole booking, and the
+        agent looped demanding a ZIP from a caller who kept saying "Dallas". A bad ZIP
+        is dropped; a city/state name resolves the state."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        zip_raw = str(data.get("zip_code") or "").strip()
+        valid_zip = bool(re.fullmatch(ZIP_PATTERN, zip_raw))
+        data["zip_code"] = zip_raw if valid_zip else None
+        state = state_from_place(data.get("state"))
+        if state is None and zip_raw and not valid_zip:
+            state = state_from_place(zip_raw)  # e.g. "Dallas" passed as the ZIP
+        data["state"] = state
+        return data
+
+    @field_validator("state")
+    @classmethod
+    def _validate_state(cls, v: str | None) -> str | None:
+        return v  # already resolved leniently above; create_booking asks if it's missing
 
 
 class VoiceLeadCreate(BaseModel):
@@ -119,15 +146,20 @@ class VoiceLeadCreate(BaseModel):
     discount_cents: int | None = Field(default=None, ge=0)
     notes: str | None = None
 
-    @field_validator("state")
+    @model_validator(mode="before")
     @classmethod
-    def _validate_state(cls, v: str | None) -> str | None:
-        if v is None or not v.strip():
-            return None
-        try:
-            return normalize_state(v)
-        except ValueError:
-            return None
+    def _resolve_location(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        zip_raw = str(data.get("zip_code") or "").strip()
+        valid_zip = bool(re.fullmatch(ZIP_PATTERN, zip_raw))
+        data["zip_code"] = zip_raw if valid_zip else None
+        state = state_from_place(data.get("state"))
+        if state is None and zip_raw and not valid_zip:
+            state = state_from_place(zip_raw)
+        data["state"] = state
+        return data
 
 
 class ParsedBookingCreate(BaseModel):
