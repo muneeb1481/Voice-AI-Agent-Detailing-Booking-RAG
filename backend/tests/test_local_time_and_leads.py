@@ -274,3 +274,30 @@ def test_lookup_with_unresolved_placeholder_never_matches_anyone(client, auth):
     result = _result(client.post("/api/vapi/lookup_appointments", json=_wrapped(
         "lookup_appointments", {"phone": "{{customer.number}}"}, number=None)))
     assert result["count"] == 0 and result["known_customer"] is None
+
+
+def test_past_closing_error_names_the_latest_start(client, auth):
+    service_id = _service_id(client, auth, "Interior Detailing Only")
+    result = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, time="4 PM", customer_name="Sam Lee", address="12 Elm St"))))
+    assert isinstance(result, str)
+    assert "closing" in result and " PM" in result
+    assert client.get("/api/bookings", headers=auth).json() == []
+
+
+def test_save_lead_flags_returning_customer(client, auth):
+    service_id = _service_id(client, auth)
+    fresh = _result(client.post("/api/vapi/save_lead", json=_wrapped("save_lead", {"service_id": service_id})))
+    assert fresh["known_customer"] is None
+
+    _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, customer_name="Sam Lee", address="12 Elm St", lead_id=fresh["lead_id"]))))
+    again = _result(client.post("/api/vapi/save_lead", json=_wrapped("save_lead", {"service_id": service_id})))
+    assert again["known_customer"]["name"] == "Sam Lee"
+    assert again["known_customer"]["address"] == "12 Elm St"
+    assert "RETURNING CUSTOMER" in again["note"]
+
+
+def test_list_services_tells_agent_not_to_read_price_list(client):
+    body = client.post("/api/vapi/list_services").json()
+    assert "names" in body["note"]

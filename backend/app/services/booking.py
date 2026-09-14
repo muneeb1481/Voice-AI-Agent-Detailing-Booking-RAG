@@ -21,7 +21,7 @@ from app.models import (
     ServicePrice,
 )
 from app.schemas import BookingCreate, ParsedBookingCreate, SlotOut
-from app.services.timezones import timezone_for_state
+from app.services.timezones import format_clock, timezone_for_state
 from app.services.vehicle import classify_vehicle_smart, is_length_based
 from app.services.zip_lookup import state_from_zip
 
@@ -83,8 +83,17 @@ def validate_window(state: str | None, start: datetime, end: datetime) -> None:
         raise _bad_request(f"We only book up to {MAX_DAYS_AHEAD} days ahead.")
     if not (BUSINESS_OPEN <= local_start.time() < BUSINESS_CLOSE):
         raise _bad_request("That is outside business hours (8 AM to 5 PM local time).")
-    if local_end.time() > BUSINESS_CLOSE and local_end.date() == local_start.date():
-        raise _bad_request("That appointment would run past closing time.")
+    if local_end.time() > BUSINESS_CLOSE or local_end.date() != local_start.date():
+        # Name the real latest start: a live call re-checked slots and asked the
+        # caller to confirm the same alternative twice when this just said "past closing".
+        latest = datetime.combine(local_start.date(), BUSINESS_CLOSE, tzinfo=tz) - (end - start)
+        latest = latest.replace(minute=latest.minute - latest.minute % SLOT_STEP_MINUTES)
+        raise _bad_request(
+            "Nothing was booked — that would run past our 5 PM closing. The latest start "
+            f"for this service that day is {format_clock(latest)}. Offer that time once; "
+            "if the caller agrees, call book_appointment with it right away without "
+            "checking slots again or asking them to confirm a second time."
+        )
 
 
 def list_slots(

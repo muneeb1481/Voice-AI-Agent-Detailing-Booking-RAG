@@ -272,7 +272,17 @@ async def list_services(request: Request, db: Session = Depends(get_db)):
         else:
             item["flat_price_cents"] = s.price_cents
         out.append(item)
-    return tool_response({"services": out}, tool_call_id)
+    return tool_response(
+        {
+            "note": (
+                "Prices are for YOUR reference. If the caller asks what services we "
+                "offer, say only the names — never read out a list of prices. Say a "
+                "price only for the specific service the caller chose."
+            ),
+            "services": out,
+        },
+        tool_call_id,
+    )
 
 
 @router.post("/list_addons", dependencies=[Depends(verify_vapi)])
@@ -509,15 +519,26 @@ async def save_lead(request: Request, db: Session = Depends(get_db)):
     if early is not None:
         return early
 
+    # Look up before saving: save_lead itself creates a customer row for this phone.
+    known = booking_service.known_customer_details(db, phone)
+    if known and not (known.get("name") or known.get("address")):
+        known = None
     lead = booking_service.save_lead(db, args, phone)
     result = {
         "lead_id": lead.id,
         "status": lead.status.value,
         "price_cents": lead.price_cents,
+        "known_customer": known,
         "note": (
             "Saved as a pending request — nothing is scheduled yet, don't tell the "
             "caller they're booked. Continue: ask what day works for them. Pass this "
             "lead_id to book_appointment once a time is agreed."
+            + (
+                " RETURNING CUSTOMER: known_customer has their saved details — do NOT ask "
+                "for anything it already has (name/address); use those values when booking."
+                if known
+                else ""
+            )
         ),
     }
     return tool_response(result, tool_call_id)
