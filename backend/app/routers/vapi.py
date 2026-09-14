@@ -414,7 +414,7 @@ _ASK_FOR_PHONE = (
 )
 
 
-def _resolve_phone(args_dict: dict, verified_number: str | None) -> str | None:
+def _resolve_phone(args_dict: dict, verified_number: str | None, strict: bool = False) -> str | None:
     """The caller's phone comes from Vapi's verified caller ID — the agent never
     asks for it. Only a web test call (no caller ID) falls back to what the agent
     passed, and never to unresolved {{customer.number}} placeholder text."""
@@ -423,7 +423,15 @@ def _resolve_phone(args_dict: dict, verified_number: str | None) -> str | None:
     supplied = str(args_dict.get("customer_phone") or "")
     if _looks_like_unresolved_phone_template(supplied):
         return None
-    return supplied  # a malformed number still fails schema validation normally
+    if not strict:
+        return supplied  # flat admin-test shape: a malformed number fails schema validation
+    # A spoken number on a live web call was saved as "65321978941652178" (speech
+    # recognition repeated digits). Only accept a real US number, stored in the same
+    # +1XXXXXXXXXX form as caller ID so the same person is recognized next time.
+    digits = "".join(ch for ch in supplied if ch.isdigit())
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return f"+1{digits}" if len(digits) == 10 else None
 
 
 @router.post("/book_appointment", dependencies=[Depends(verify_vapi)])
@@ -433,14 +441,14 @@ async def book_appointment(request: Request, db: Session = Depends(get_db)):
     # A web call has no caller ID: a live call passed the number the caller said to
     # save_lead, then left it off book_appointment — take it from that same lead.
     lead_hint = booking_service._pending_lead(db, args_dict.get("lead_id"))
-    phone = _resolve_phone(args_dict, verified_number) or (
+    phone = _resolve_phone(args_dict, verified_number, strict=tool_call_id is not None) or (
         lead_hint.customer.phone if lead_hint else None
     )
     missing: list[str] = []
-    if phone is None:
+    phone_missing = phone is None
+    if phone_missing:
         if tool_call_id is None:
             return _error(_ASK_FOR_PHONE, tool_call_id)
-        missing.append("their phone number (there's no caller ID on this call)")
     else:
         args_dict["customer_phone"] = phone
 
@@ -464,6 +472,13 @@ async def book_appointment(request: Request, db: Session = Depends(get_db)):
                 "the street address where the car will be (house number and street — "
                 "a city alone isn't enough)"
             )
+    # Phone is asked last (only when there's no caller ID), after name and address.
+    if phone_missing:
+        missing.append(
+            "their phone number, asked last (no caller ID on this call) — it must be a "
+            "real 10-digit number; if what you passed wasn't, ask again and read it back "
+            "digit by digit to confirm"
+        )
     # Report everything missing at once: a live call was refused only for the phone,
     # then the agent told the caller "your appointment is set" anyway.
     if missing:
@@ -525,9 +540,25 @@ async def save_lead(request: Request, db: Session = Depends(get_db)):
     "needs callback" lead with the phone, vehicle, service and quoted price.
     Calling it again in the same call just updates that one lead."""
     args_dict, tool_call_id, verified_number = await parse_tool_call_full(request)
-    phone = _resolve_phone(args_dict, verified_number)
+    phone = _resolve_phone(args_dict, verified_number, strict=tool_call_id is not None)
     if phone is None:
-        return _error(_ASK_FOR_PHONE, tool_call_id)
+        if tool_call_id is None:
+            return _error(_ASK_FOR_PHONE, tool_call_id)
+        # No caller ID (web test call): a lead needs a phone to be called back, so it
+        # can't be saved yet — but the phone is asked LAST, so don't derail the call.
+        return tool_response(
+            {
+                "lead_id": None,
+                "status": "not_saved_yet",
+                "note": (
+                    "No caller ID on this call, so the request can't be saved yet — "
+                    "don't mention this. Continue normally: ask what day works for them. "
+                    "After the time is agreed, ask their name, then street address, then "
+                    "(last) their phone number, and pass it to book_appointment."
+                ),
+            },
+            tool_call_id,
+        )
     if _looks_like_placeholder_name(args_dict.get("customer_name")):
         # A lead is saved before the name is asked — drop a guessed name rather than
         # store the assistant's own name as this caller's (it would make every later
@@ -557,9 +588,9 @@ async def save_lead(request: Request, db: Session = Depends(get_db)):
                 "for anything it already has (name/address); use those values when booking. "
                 "Next, ask what day works for them."
                 if known
-                else " NEW CUSTOMER — your very next questions, one at a time: (1) their "
-                "full name, (2) the street address where the car will be (house number "
-                "and street). Only after you have both, ask what day works for them."
+                else " NEW CUSTOMER — next ask what day works for them. Once the time is "
+                "agreed, ask one at a time: (1) their full name, (2) the street address "
+                "where the car will be (house number and street). Then book."
             )
         ),
     }

@@ -139,7 +139,9 @@ def test_web_call_without_caller_id_asks_for_phone(client, auth):
             json=_wrapped("save_lead", {"customer_phone": "{{customer.number}}"}, number=None),
         )
     )
-    assert isinstance(result, str) and "phone number" in result
+    # Phone is asked last: no caller ID doesn't derail the call, it continues to the day.
+    assert result["lead_id"] is None and result["status"] == "not_saved_yet"
+    assert "day" in result["note"] and "phone number" in result["note"]
 
 
 def test_lead_saved_before_time_then_confirmed_by_booking(client, auth):
@@ -336,9 +338,12 @@ def test_web_call_replay_phone_from_lead_and_all_missing_reported(client, auth):
     told the caller they were booked. Must report name AND address, reuse the phone."""
     service_id = _service_id(client, auth, "Interior Detailing Only")
     lead = _result(client.post("/api/vapi/save_lead", json=_wrapped(
-        "save_lead", {"service_id": service_id, "zip_code": "21201", "customer_phone": "94169084342"},
+        "save_lead", {"service_id": service_id, "zip_code": "21201", "customer_phone": "941-690-8434"},
         number=None)))
-    assert "NEW CUSTOMER" in lead["note"] and "full name" in lead["note"]
+    assert "NEW CUSTOMER" in lead["note"]
+    # Order: day first, then name, then address.
+    note = lead["note"]
+    assert note.index("what day") < note.index("full name") < note.index("street address")
 
     refused = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
         "book_appointment",
@@ -354,4 +359,26 @@ def test_web_call_replay_phone_from_lead_and_all_missing_reported(client, auth):
         number=None)))
     assert booked["booking_id"] == lead["lead_id"]
     row = client.get("/api/bookings", headers=auth).json()[0]
-    assert (row["customer"]["phone"], row["customer"]["name"], row["status"]) == ("94169084342", "Sara Khan", "scheduled")
+    assert (row["customer"]["phone"], row["customer"]["name"], row["status"]) == ("+19416908434", "Sara Khan", "scheduled")
+
+
+def test_missing_details_listed_name_address_then_phone(client, auth):
+    service_id = _service_id(client, auth)
+    refused = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id), number=None)))
+    assert refused.startswith("BOOKING FAILED")
+    assert refused.index("name") < refused.index("street address") < refused.index("phone number")
+
+
+def test_garbled_spoken_phone_is_refused_and_valid_one_normalized(client, auth):
+    """Live web call saved "65321978941652178" as the customer's phone."""
+    service_id = _service_id(client, auth)
+    args = _book_args(service_id, customer_name="Alex Doe", address="215 Street 48")
+    refused = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", {**args, "customer_phone": "65321978941652178"}, number=None)))
+    assert refused.startswith("BOOKING FAILED") and "10-digit" in refused
+
+    booked = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", {**args, "customer_phone": "(653) 219-7894"}, number=None)))
+    assert "booking_id" in booked
+    assert client.get("/api/bookings", headers=auth).json()[0]["customer"]["phone"] == "+16532197894"
