@@ -301,3 +301,30 @@ def test_save_lead_flags_returning_customer(client, auth):
 def test_list_services_tells_agent_not_to_read_price_list(client):
     body = client.post("/api/vapi/list_services").json()
     assert "names" in body["note"]
+
+
+def test_assistant_own_name_is_never_booked_for_a_new_caller(client, auth):
+    """Live call: the agent booked a new caller as "Muneeb" — its own greeting name."""
+    service_id = _service_id(client, auth)
+    lead = _result(client.post("/api/vapi/save_lead", json=_wrapped(
+        "save_lead", {"service_id": service_id, "customer_name": "Muneeb"})))
+    refused = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, customer_name="Muneeb", address="12 Elm St", lead_id=lead["lead_id"]))))
+    assert isinstance(refused, str) and "name" in refused.lower()
+
+    booked = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, customer_name="Sara Khan", address="12 Elm St", lead_id=lead["lead_id"]))))
+    assert "booking_id" in booked
+    row = client.get("/api/bookings", headers=auth).json()[0]
+    assert row["customer"]["name"] == "Sara Khan"
+
+
+def test_returning_caller_keeps_saved_name_even_if_agent_sends_its_own(client, auth):
+    service_id = _service_id(client, auth)
+    _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, customer_name="Sara Khan", address="12 Elm St"))))
+    second = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, time="2 PM", customer_name="Muneeb", address="12 Elm St"))))
+    assert "booking_id" in second
+    names = {b["customer"]["name"] for b in client.get("/api/bookings", headers=auth).json()}
+    assert names == {"Sara Khan"}

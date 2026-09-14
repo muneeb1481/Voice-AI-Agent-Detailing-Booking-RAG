@@ -385,10 +385,13 @@ _PLACEHOLDER_WORDS = {"customer name", "name", "unknown", "caller", "customer", 
 
 
 def _looks_like_placeholder_name(name: str | None) -> bool:
-    """A live call booked "[Customer Name]" — the model filled the required field
-    with template text instead of asking. Never save that as a real name."""
+    """Not a name the caller actually gave. Live calls booked "[Customer Name]"
+    (template text) and "Muneeb" — the ASSISTANT's own name from its greeting —
+    because the model never asked. Neither may be saved as a customer's name."""
     cleaned = (name or "").strip().lower()
-    return not cleaned or "[" in cleaned or "{" in cleaned or cleaned in _PLACEHOLDER_WORDS
+    if not cleaned or "[" in cleaned or "{" in cleaned or cleaned in _PLACEHOLDER_WORDS:
+        return True
+    return cleaned == settings.assistant_name.strip().lower()
 
 
 def _looks_like_street_address(address: str | None) -> bool:
@@ -443,9 +446,9 @@ async def book_appointment(request: Request, db: Session = Depends(get_db)):
             args_dict["customer_name"] = known["name"]
         else:
             return _error(
-                "Nothing was booked yet — you don't have the caller's real name. Ask "
-                "\"Can I get your name for the appointment?\", then call book_appointment "
-                "again with it. Never pass placeholder text as a name.",
+                "Nothing was booked yet — you don't have the CUSTOMER's name (and never "
+                "use your own name or placeholder text). Ask \"Can I get your name for "
+                "the appointment?\", then call book_appointment again with their answer.",
                 tool_call_id,
             )
     if known is not None and not _looks_like_street_address(args_dict.get("address")):
@@ -514,6 +517,11 @@ async def save_lead(request: Request, db: Session = Depends(get_db)):
     phone = _resolve_phone(args_dict, verified_number)
     if phone is None:
         return _error(_ASK_FOR_PHONE, tool_call_id)
+    if _looks_like_placeholder_name(args_dict.get("customer_name")):
+        # A lead is saved before the name is asked — drop a guessed name rather than
+        # store the assistant's own name as this caller's (it would make every later
+        # call from this number look like a returning customer under that name).
+        args_dict["customer_name"] = None
 
     args, early = _validated(VoiceLeadCreate, args_dict, tool_call_id)
     if early is not None:

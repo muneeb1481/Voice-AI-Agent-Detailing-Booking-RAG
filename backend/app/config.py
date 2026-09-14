@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
 
     brand_name: str = "ShinePro Detailing"
+    # The name the voice assistant introduces itself with — never a customer's name.
+    assistant_name: str = "Muneeb"
 
     @property
     def cors_origin_list(self) -> list[str]:
