@@ -5,7 +5,8 @@ lookup. A handful of states genuinely span two zones (FL panhandle, west TX, KY,
 IN, MI); we use each state's majority zone, which is the right call for "is 9am a
 valid slot" rather than a Prohibited-by-GPS-coordinate answer.
 """
-from datetime import datetime
+import re
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 STATE_TIMEZONES: dict[str, str] = {
@@ -40,6 +41,66 @@ def timezone_for_state(state: str | None) -> ZoneInfo:
 
 def local_now(state: str | None = None) -> datetime:
     return datetime.now(timezone_for_state(state))
+
+
+# --- Caller wall-clock <-> stored UTC ---------------------------------------
+# The voice agent only ever speaks the caller's own local time ("3 PM"). A live
+# call showed the model passing that as a naive or "Z"-suffixed ISO string, which
+# was then stored as 3 PM *UTC* — so a Texas caller's 3 PM showed up as ~10 AM on
+# the dashboard. Every voice tool now treats a time as the job state's wall clock
+# and converts here, so the model never does timezone math.
+
+_CLOCK_RE = re.compile(r"^\s*(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(a\.?m\.?|p\.?m\.?)?\s*$", re.I)
+
+
+def parse_clock_time(text: str | None) -> time | None:
+    """"3 PM", "3:30pm", "15:00", "10 a.m." -> time. None if unrecognizable."""
+    if not text:
+        return None
+    cleaned = text.strip().lower().replace("o'clock", "").replace("noon", "12 pm")
+    m = _CLOCK_RE.match(cleaned)
+    if not m:
+        return None
+    hour, minute = int(m.group(1)), int(m.group(2) or 0)
+    meridiem = (m.group(3) or "").replace(".", "")
+    if meridiem:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if meridiem == "pm" else 0)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return time(hour, minute)
+
+
+def wall_clock_to_utc(day: date, clock: time, state: str | None) -> datetime:
+    return datetime.combine(day, clock, tzinfo=timezone_for_state(state)).astimezone(timezone.utc)
+
+
+def reinterpret_as_wall_clock(dt: datetime, state: str | None) -> datetime:
+    """Keep the date/hour/minute the agent wrote and discard whatever offset it
+    attached — that number is always the caller's local time, never UTC."""
+    return wall_clock_to_utc(dt.date(), dt.time().replace(tzinfo=None), state)
+
+
+def to_local(dt: datetime, state: str | None) -> datetime:
+    aware = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return aware.astimezone(timezone_for_state(state))
+
+
+def format_clock(dt: datetime) -> str:
+    """Spoken-style time, e.g. "3:00 PM" (no leading zero, platform-independent)."""
+    return f"{dt.hour % 12 or 12}:{dt.minute:02d} {'AM' if dt.hour < 12 else 'PM'}"
+
+
+def describe_local(dt: datetime, state: str | None) -> dict:
+    """What the agent reads back — local date and time only, no timezone name."""
+    local = to_local(dt, state)
+    return {
+        "date": local.date().isoformat(),
+        "day_of_week": local.strftime("%A"),
+        "time": format_clock(local),
+        "starts_at_local": local.replace(tzinfo=None).isoformat(timespec="minutes"),
+    }
 
 
 # Two buckets, not four — morning and afternoon both close with "have a nice day";

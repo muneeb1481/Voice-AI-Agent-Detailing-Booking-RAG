@@ -26,7 +26,7 @@ from app.services.vehicle import classify_vehicle_smart, is_length_based
 from app.services.zip_lookup import state_from_zip
 
 BUSINESS_OPEN = time(8, 0)
-BUSINESS_CLOSE = time(18, 0)
+BUSINESS_CLOSE = time(17, 0)  # 8 AM - 5 PM in the job's own state
 SLOT_STEP_MINUTES = 30
 MAX_DAYS_AHEAD = 60
 
@@ -82,7 +82,7 @@ def validate_window(state: str | None, start: datetime, end: datetime) -> None:
     if start > now + timedelta(days=MAX_DAYS_AHEAD):
         raise _bad_request(f"We only book up to {MAX_DAYS_AHEAD} days ahead.")
     if not (BUSINESS_OPEN <= local_start.time() < BUSINESS_CLOSE):
-        raise _bad_request("That is outside business hours (8:00-18:00 local time).")
+        raise _bad_request("That is outside business hours (8 AM to 5 PM local time).")
     if local_end.time() > BUSINESS_CLOSE and local_end.date() == local_start.date():
         raise _bad_request("That appointment would run past closing time.")
 
@@ -255,7 +255,11 @@ def _apply_discount(
     return final, subtotal - final
 
 
-def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -> Booking:
+def create_booking(
+    db: Session, payload: BookingCreate, source: str = "voice", lead_id: str | None = None
+) -> Booking:
+    """`lead_id` names a pending lead this booking confirms — that same row becomes
+    the scheduled appointment, so a callback lead never lingers as a duplicate."""
     start = _as_utc(payload.starts_at)
     state = payload.state or state_from_zip(payload.zip_code)
     if state is None:
@@ -322,31 +326,104 @@ def create_booking(db: Session, payload: BookingCreate, source: str = "voice") -
     customer = get_or_create_customer(
         db, payload.customer_name, payload.customer_phone, payload.customer_email
     )
-    booking = Booking(
-        customer_id=customer.id,
-        service_id=service.id if service else None,
-        state=state,
-        zip_code=payload.zip_code,
-        detailer=payload.detailer,
-        vehicle=payload.vehicle,
-        vehicle_category=category,
-        vehicle_length_ft=payload.vehicle_length_ft,
-        address=payload.address,
-        notes=payload.notes,
-        price_cents=price_cents,
-        original_price_cents=original_price_cents,
-        discount_cents=discount_applied,
-        service_label=label,
-        starts_at=start,
-        ends_at=end,
-        status=BookingStatus.scheduled,
-        source=source,
-    )
+    booking = _pending_lead(db, lead_id) or Booking(source=source)
+    booking.customer_id = customer.id
+    booking.service_id = service.id if service else None
+    booking.state = state
+    booking.zip_code = payload.zip_code
+    booking.detailer = payload.detailer
+    booking.vehicle = payload.vehicle
+    booking.vehicle_category = category
+    booking.vehicle_length_ft = payload.vehicle_length_ft
+    booking.address = payload.address
+    booking.notes = payload.notes or booking.notes
+    booking.price_cents = price_cents
+    booking.original_price_cents = original_price_cents
+    booking.discount_cents = discount_applied
+    booking.service_label = label
+    booking.starts_at = start
+    booking.ends_at = end
+    booking.status = BookingStatus.scheduled
     booking.items = items
     db.add(booking)
     db.commit()
     db.refresh(booking)
     return booking
+
+
+def _pending_lead(db: Session, lead_id: str | None) -> Booking | None:
+    if not lead_id:
+        return None
+    lead = db.get(Booking, lead_id)
+    return lead if lead is not None and lead.status == BookingStatus.pending else None
+
+
+def find_pending_lead(db: Session, phone: str) -> Booking | None:
+    """The caller's most recent open lead — so a repeat save_lead updates it and a
+    later book_appointment confirms it, instead of piling up duplicates."""
+    return db.execute(
+        select(Booking)
+        .join(Customer)
+        .where(Customer.phone == phone)
+        .where(Booking.status == BookingStatus.pending)
+        .order_by(Booking.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def save_lead(db: Session, payload, phone: str) -> Booking:
+    """Record intent before a day/time is agreed: the caller said yes to a service
+    at a quoted price. No slot is reserved — a human calls back to schedule it.
+    Pricing is best-effort here; a lead is never rejected for missing details."""
+    state = payload.state or state_from_zip(payload.zip_code)
+    category = classify_vehicle_smart(payload.vehicle)
+
+    service = db.get(Service, payload.service_id) if payload.service_id else None
+    items: list[BookingItem] = []
+    price_cents = original_price_cents = None
+    discount_applied = 0
+    try:
+        base_price, floor_cents = (
+            _service_price(db, service, category, payload.vehicle_length_ft) if service else (0, None)
+        )
+        items, extras_price, _duration, extras_floor = _resolve_extras(
+            db, payload.extra_service_ids, payload.addon_ids, category, payload.vehicle_length_ft
+        )
+        if service or items:
+            original_price_cents = base_price + extras_price
+            price_cents, discount_applied = _apply_discount(
+                original_price_cents, payload.discount_cents, (floor_cents or 0) + extras_floor
+            )
+    except HTTPException:
+        items = []  # can't price it yet (unknown category etc.) — keep the lead anyway
+
+    labels = ([service.name] if service else []) + [i.name for i in items]
+
+    existing = find_pending_lead(db, phone)
+    customer = existing.customer if existing else None
+    name = payload.customer_name or (customer.name if customer else None) or "Unknown caller"
+    customer = get_or_create_customer(db, name, phone)
+
+    lead = existing or Booking(source="voice", status=BookingStatus.pending)
+    lead.customer_id = customer.id
+    lead.service_id = service.id if service else lead.service_id
+    lead.state = state or lead.state
+    lead.zip_code = payload.zip_code or lead.zip_code
+    lead.vehicle = payload.vehicle or lead.vehicle
+    lead.vehicle_category = category or lead.vehicle_category
+    lead.vehicle_length_ft = payload.vehicle_length_ft or lead.vehicle_length_ft
+    lead.address = payload.address or lead.address
+    lead.notes = payload.notes or lead.notes
+    if labels:
+        lead.service_label = ", ".join(labels)
+        lead.items = items
+        lead.price_cents = price_cents
+        lead.original_price_cents = original_price_cents
+        lead.discount_cents = discount_applied
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+    return lead
 
 
 def create_parsed_booking(db: Session, payload: ParsedBookingCreate) -> Booking:
@@ -423,9 +500,14 @@ def reschedule_booking(
         raise _bad_request("That appointment is cancelled and cannot be rescheduled.")
 
     start = _as_utc(new_start)
-    minutes = duration_minutes or int(
-        (booking.ends_at - booking.starts_at).total_seconds() // 60
-    )
+    if duration_minutes:
+        minutes = duration_minutes
+    elif booking.starts_at and booking.ends_at:
+        minutes = int((booking.ends_at - booking.starts_at).total_seconds() // 60)
+    else:  # a pending lead getting its first time
+        minutes = (booking.service.duration_minutes if booking.service else 90) + sum(
+            i.duration_minutes for i in booking.items
+        )
     end = start + timedelta(minutes=minutes)
     validate_window(booking.state, start, end)
 
@@ -436,7 +518,9 @@ def reschedule_booking(
 
     booking.starts_at = start
     booking.ends_at = end
-    booking.status = BookingStatus.rescheduled
+    booking.status = (
+        BookingStatus.scheduled if booking.status == BookingStatus.pending else BookingStatus.rescheduled
+    )
     db.commit()
     db.refresh(booking)
     return booking
@@ -454,6 +538,8 @@ def cancel_booking(db: Session, booking_id: str, reason: str | None = None) -> B
 
 def set_status(db: Session, booking_id: str, new_status: BookingStatus) -> Booking:
     booking = _require(db, booking_id)
+    if booking.starts_at is None and new_status not in (BookingStatus.pending, BookingStatus.cancelled):
+        raise _bad_request("This lead has no appointment time yet — use Move to schedule it first.")
     booking.status = new_status
     db.commit()
     db.refresh(booking)

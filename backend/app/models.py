@@ -43,6 +43,9 @@ class Base(DeclarativeBase):
 
 
 class BookingStatus(str, enum.Enum):
+    # A caller said yes to the service/price but no day/time was locked in yet
+    # (or the call dropped first) — no starts_at, a human calls them back.
+    pending = "pending"
     scheduled = "scheduled"
     done = "done"
     rescheduled = "rescheduled"
@@ -198,8 +201,11 @@ class Booking(Base):
     # (e.g. parsed from "interior exterior" with no matching service_id).
     service_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Null only for a `pending` lead — the time hasn't been agreed yet.
+    starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[BookingStatus] = mapped_column(
         Enum(BookingStatus), default=BookingStatus.scheduled, index=True
     )

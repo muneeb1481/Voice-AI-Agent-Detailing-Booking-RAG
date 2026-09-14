@@ -90,8 +90,11 @@ def test_list_slots_tool(client):
         "/api/vapi/list_slots", json={"state": "TN", "day": future(days=6, hour=0)}
     )
     assert resp.status_code == 200
-    assert resp.json()["count"] > 0
-    assert len(resp.json()["slots"]) <= 8
+    body = resp.json()
+    assert body["count"] > 0
+    # Every open time, not a truncated first-8 — an afternoon slot must be visible.
+    assert len(body["open_times"]) == body["count"]
+    assert body["open_times"][0] == "8:00 AM"
 
 
 def test_llm_supplied_garbage_is_rejected(client):

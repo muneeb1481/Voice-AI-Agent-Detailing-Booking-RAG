@@ -23,7 +23,8 @@ import { api } from '@/lib/api'
 import { STATUSES, type Booking, type BookingStatus, type Detailer } from '@/lib/types'
 import { US_STATES } from '@/lib/usStates'
 import { jobSummaryText } from '@/lib/jobSummary'
-import { cn, formatDate, formatMoney, formatTime, toISODate } from '@/lib/utils'
+import { STATUS_LABEL } from '@/lib/types'
+import { cn, formatDate, formatMoney, formatTime, localDateKey, toISODate } from '@/lib/utils'
 
 function startOfWeek(d: Date) {
   const copy = new Date(d)
@@ -56,8 +57,19 @@ export function Bookings() {
 
   useEffect(loadDetailers, [loadDetailers])
 
+  // Callback leads have no time, so a date range never matches them — fetched separately.
+  const [leads, setLeads] = useState<Booking[]>([])
+
   const load = useCallback(() => {
     setBookings(null)
+    if (!status || status === 'pending') {
+      api
+        .bookings({ status: 'pending', state: state || undefined })
+        .then(setLeads)
+        .catch(() => setLeads([]))
+    } else {
+      setLeads([])
+    }
     api
       .bookings({
         date_from: from ? `${from}T00:00:00Z` : undefined,
@@ -80,7 +92,9 @@ export function Bookings() {
     if (!bookings) return []
     const map = new Map<string, Booking[]>()
     for (const b of bookings) {
-      const key = b.starts_at.slice(0, 10)
+      if (!b.starts_at) continue
+      // Group by the job's own local day — a 7 PM Pacific job is not "tomorrow" in UTC.
+      const key = localDateKey(b.starts_at, b.state)
       map.set(key, [...(map.get(key) ?? []), b])
     }
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
@@ -162,7 +176,7 @@ export function Bookings() {
               <option value="">Any status</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {STATUS_LABEL[s]}
                 </option>
               ))}
             </Select>
@@ -179,13 +193,72 @@ export function Bookings() {
         </div>
       </Card>
 
+      {leads.length > 0 && (
+        <Card className="animate-fade-up overflow-hidden">
+          <CardHeader
+            title="Needs callback"
+            subtitle={`${leads.length} caller${leads.length === 1 ? '' : 's'} wanted to book but no day/time was set — call back to schedule, then use Move.`}
+          />
+          <ul className="divide-y divide-[rgb(var(--border))]">
+            {leads.map((b) => {
+              const isOpen = expanded.has(b.id)
+              return (
+                <li key={b.id}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(b.id)}
+                    className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5 text-left transition-colors hover:bg-[rgb(var(--bg-subtle))]"
+                  >
+                    <div className="w-24 shrink-0">
+                      <p className="text-sm font-medium">No time yet</p>
+                      <p className="text-[11px] text-muted">
+                        asked {formatDate(b.created_at, b.state)}
+                      </p>
+                    </div>
+                    <div className="min-w-[10rem] flex-1">
+                      <p className="text-sm font-medium">{b.customer.name}</p>
+                      <p className="text-xs text-muted">
+                        {b.customer.phone}
+                        {b.vehicle && ` · ${b.vehicle}`}
+                        {b.service_label && ` · ${b.service_label}`}
+                        {b.price_cents != null && ` · ${formatMoney(b.price_cents)}`}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <StateBadge state={b.state} />
+                      <StatusBadge status={b.status} />
+                    </div>
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 shrink-0 text-muted transition-transform',
+                        isOpen && 'rotate-180',
+                      )}
+                    />
+                  </button>
+                  {isOpen && (
+                    <BookingDetail
+                      booking={b}
+                      detailers={detailers}
+                      onCopy={() => copyJob(b)}
+                      onMove={() => setRescheduling(b)}
+                      onStatusChange={(next) => changeStatus(b, next)}
+                      onDetailerSaved={load}
+                    />
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </Card>
+      )}
+
       {bookings === null ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-28" />
           ))}
         </div>
-      ) : days.length === 0 ? (
+      ) : days.length === 0 && leads.length > 0 ? null : days.length === 0 ? (
         <Card>
           <EmptyState
             icon={<CalendarDays className="h-6 w-6" />}
@@ -417,7 +490,7 @@ function BookingDetail({
           >
             {STATUSES.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {STATUS_LABEL[s]}
               </option>
             ))}
           </Select>

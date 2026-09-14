@@ -6,7 +6,7 @@ import { useToast } from '@/components/ui/Toast'
 import { api } from '@/lib/api'
 import type { AddOn, Detailer, Service } from '@/lib/types'
 import { US_STATES } from '@/lib/usStates'
-import { formatMoney } from '@/lib/utils'
+import { formatMoney, stateWallClockToIso } from '@/lib/utils'
 
 interface Props {
   open: boolean
@@ -66,8 +66,8 @@ export function NewBookingModal({ open, detailers, onClose, onCreated }: Props) 
     e.preventDefault()
     setSaving(true)
     try {
-      // The local wall-clock the admin typed, sent as an explicit instant.
-      const startsAt = new Date(`${form.date}T${form.time}:00`).toISOString()
+      // The time typed is the job state's local time, not the admin's browser zone.
+      const startsAt = stateWallClockToIso(form.date, form.time, form.state)
       await api.createBooking({
         customer_name: form.customer_name,
         customer_phone: form.customer_phone,

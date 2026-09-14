@@ -35,19 +35,71 @@ const STATE_TIMEZONES: Record<string, string> = {
 }
 const DEFAULT_TIMEZONE = 'America/New_York'
 
-function timeZoneForState(state?: string | null) {
+export function timeZoneForState(state?: string | null) {
   return STATE_TIMEZONES[(state ?? '').toUpperCase()] ?? DEFAULT_TIMEZONE
 }
 
-export function formatTime(iso: string, state?: string | null) {
+/** e.g. "3:00 PM CDT" — always in the job's own state, never the viewer's zone. */
+export function formatTime(iso: string | null, state?: string | null) {
+  if (!iso) return 'No time yet'
   return new Date(iso).toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
     timeZone: timeZoneForState(state),
   })
 }
 
-export function formatDate(iso: string, state?: string | null) {
+/** Calendar date (YYYY-MM-DD) of an instant in the job's own state. */
+export function localDateKey(iso: string, state?: string | null) {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: timeZoneForState(state),
+  }).format(new Date(iso))
+}
+
+/** "HH:MM" of an instant in the job's own state. */
+export function localTimeKey(iso: string, state?: string | null) {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: timeZoneForState(state),
+  }).format(new Date(iso))
+}
+
+/** A date + wall-clock time typed for a job in `state` -> UTC ISO string.
+ * Uses the state's zone, not the browser's: an admin in any timezone typing
+ * 10:00 for a Maryland job gets 10 AM Maryland time. */
+export function stateWallClockToIso(date: string, time: string, state?: string | null) {
+  const guess = new Date(`${date}T${time}:00Z`)
+  // Offset of the state's zone at (roughly) that instant; re-check once for DST edges.
+  const offsetAt = (d: Date) => {
+    const asLocal = new Date(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: timeZoneForState(state),
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+        .format(d)
+        .replace(/(\d+)\/(\d+)\/(\d+), (\d+):(\d+):(\d+)/, '$3-$1-$2T$4:$5:$6Z'),
+    )
+    return asLocal.getTime() - d.getTime()
+  }
+  let utc = guess.getTime() - offsetAt(guess)
+  utc = guess.getTime() - offsetAt(new Date(utc))
+  return new Date(utc).toISOString()
+}
+
+export function formatDate(iso: string | null, state?: string | null) {
+  if (!iso) return 'No date yet'
   return new Date(iso).toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',

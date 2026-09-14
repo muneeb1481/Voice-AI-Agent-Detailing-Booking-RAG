@@ -28,6 +28,18 @@ def init_db() -> None:
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=engine)
+    if settings.uses_postgres:
+        _migrate_postgres()
+
+
+def _migrate_postgres() -> None:
+    """create_all never alters existing tables — apply the pending-lead schema
+    changes to an already-deployed database. Every statement is idempotent."""
+    # ALTER TYPE ... ADD VALUE can't run inside a transaction block on older Postgres.
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text("ALTER TYPE bookingstatus ADD VALUE IF NOT EXISTS 'pending'"))
+        conn.execute(text("ALTER TABLE bookings ALTER COLUMN starts_at DROP NOT NULL"))
+        conn.execute(text("ALTER TABLE bookings ALTER COLUMN ends_at DROP NOT NULL"))
 
 
 if not settings.uses_postgres:

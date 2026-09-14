@@ -10,14 +10,14 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { CalendarClock, CalendarDays, FileText, Layers, XCircle } from 'lucide-react'
+import { CalendarClock, CalendarDays, FileText, Layers, PhoneCall, XCircle } from 'lucide-react'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { Skeleton, EmptyState } from '@/components/ui/Skeleton'
 import { StateBadge, StatusBadge } from '@/components/ui/Badge'
 import { api } from '@/lib/api'
 import type { Booking, Stats } from '@/lib/types'
 import { stateColor } from '@/lib/usStates'
-import { formatDate, formatTime } from '@/lib/utils'
+import { formatDate, formatMoney, formatTime } from '@/lib/utils'
 
 function StatTile({
   label,
@@ -49,10 +49,15 @@ function StatTile({
 export function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [upcoming, setUpcoming] = useState<Booking[] | null>(null)
+  const [leads, setLeads] = useState<Booking[]>([])
 
   useEffect(() => {
     const now = new Date().toISOString()
     api.stats().then(setStats).catch(() => setStats(null))
+    api
+      .bookings({ status: 'pending' })
+      .then(setLeads)
+      .catch(() => setLeads([]))
     api
       .bookings({ date_from: now })
       .then((b) => setUpcoming(b.slice(0, 6)))
@@ -68,9 +73,15 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         {stats ? (
           <>
+            <StatTile
+              label="Needs callback"
+              value={stats.needs_callback}
+              icon={<PhoneCall className="h-4 w-4" />}
+              hint="wanted to book, no time set"
+            />
             <StatTile
               label="Today"
               value={stats.bookings_today}
@@ -102,9 +113,46 @@ export function Dashboard() {
             />
           </>
         ) : (
-          Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-[104px]" />)
+          Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[104px]" />)
         )}
       </div>
+
+      {leads.length > 0 && (
+        <Card>
+          <CardHeader
+            title="Needs callback"
+            subtitle="Callers who said yes but hung up before picking a day/time"
+            action={
+              <Link
+                to="/bookings"
+                className="text-xs font-medium text-[rgb(var(--accent))] hover:underline"
+              >
+                Schedule
+              </Link>
+            }
+          />
+          <ul className="divide-y divide-[rgb(var(--border))]">
+            {leads.slice(0, 6).map((b) => (
+              <li key={b.id} className="flex items-center gap-4 px-5 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {b.customer.name} · {b.customer.phone}
+                  </p>
+                  <p className="truncate text-xs text-muted">
+                    {[b.vehicle, b.service_label, b.price_cents != null ? formatMoney(b.price_cents) : null]
+                      .filter(Boolean)
+                      .join(' · ') || 'No details captured'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-1.5">
+                  <StateBadge state={b.state} />
+                  <StatusBadge status={b.status} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-2">

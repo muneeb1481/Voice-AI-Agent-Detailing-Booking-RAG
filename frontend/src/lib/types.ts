@@ -1,6 +1,14 @@
-export type BookingStatus = 'scheduled' | 'done' | 'rescheduled' | 'cancelled'
+export type BookingStatus = 'pending' | 'scheduled' | 'done' | 'rescheduled' | 'cancelled'
 
-export const STATUSES: BookingStatus[] = ['scheduled', 'done', 'rescheduled', 'cancelled']
+export const STATUSES: BookingStatus[] = ['pending', 'scheduled', 'done', 'rescheduled', 'cancelled']
+
+export const STATUS_LABEL: Record<BookingStatus, string> = {
+  pending: 'needs callback',
+  scheduled: 'scheduled',
+  done: 'done',
+  rescheduled: 'rescheduled',
+  cancelled: 'cancelled',
+}
 
 export interface Customer {
   id: string
@@ -35,9 +43,11 @@ export interface Booking {
   discount_cents: number
   service_label: string | null
   items: BookingItem[]
-  starts_at: string
-  ends_at: string
+  /** null only for a pending callback lead — no time agreed yet */
+  starts_at: string | null
+  ends_at: string | null
   status: BookingStatus
+  created_at: string
   source: BookingSource
   customer: Customer
 }
@@ -74,6 +84,7 @@ export interface Stats {
   bookings_this_week: number
   upcoming: number
   cancelled_this_week: number
+  needs_callback: number
   documents: number
   chunks: number
   by_state: Record<string, number>

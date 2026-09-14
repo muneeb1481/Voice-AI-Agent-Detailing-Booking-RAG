@@ -37,7 +37,11 @@ def list_bookings(
     db: Session = Depends(get_db),
     _: str = Depends(current_admin),
 ) -> list[Booking]:
-    stmt = select(Booking).options(joinedload(Booking.customer)).order_by(Booking.starts_at)
+    stmt = (
+        select(Booking)
+        .options(joinedload(Booking.customer))
+        .order_by(Booking.starts_at.asc().nulls_last(), Booking.created_at.desc())
+    )
     if date_from:
         stmt = stmt.where(Booking.starts_at >= date_from)
     if date_to:
@@ -173,6 +177,7 @@ def stats(db: Session = Depends(get_db), _: str = Depends(current_admin)) -> Das
         cancelled_this_week=count(
             Booking.status == BookingStatus.cancelled, Booking.starts_at >= week_start
         ),
+        needs_callback=count(Booking.status == BookingStatus.pending),
         documents=db.execute(select(func.count()).select_from(Document)).scalar_one(),
         chunks=db.execute(select(func.count()).select_from(DocumentChunk)).scalar_one(),
         by_state=by_state,

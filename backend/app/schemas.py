@@ -97,6 +97,37 @@ class VoiceBookingCreate(BookingCreate):
     vehicle: str = Field(min_length=1, max_length=255)
     address: str = Field(min_length=1)
     service_id: str = Field(min_length=1, description="From list_services — never invented")
+    lead_id: str | None = Field(
+        default=None, description="From save_lead — this booking confirms that pending lead."
+    )
+
+
+class VoiceLeadCreate(BaseModel):
+    """A caller said yes to the service and price, but the day/time isn't locked in
+    yet. Everything is optional except what makes it worth a callback: a phone."""
+
+    customer_name: str | None = Field(default=None, max_length=255)
+    customer_phone: str | None = Field(default=None, max_length=32)
+    state: str | None = Field(default=None, max_length=20)
+    zip_code: str | None = Field(default=None, max_length=10)
+    vehicle: str | None = Field(default=None, max_length=255)
+    vehicle_length_ft: float | None = Field(default=None, gt=0)
+    address: str | None = None
+    service_id: str | None = None
+    extra_service_ids: list[str] = Field(default_factory=list)
+    addon_ids: list[str] = Field(default_factory=list)
+    discount_cents: int | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+    @field_validator("state")
+    @classmethod
+    def _validate_state(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        try:
+            return normalize_state(v)
+        except ValueError:
+            return None
 
 
 class ParsedBookingCreate(BaseModel):
@@ -168,9 +199,10 @@ class BookingOut(ORMModel):
     discount_cents: int
     service_label: str | None
     items: list[BookingItemOut] = []
-    starts_at: datetime
-    ends_at: datetime
+    starts_at: datetime | None
+    ends_at: datetime | None
     status: BookingStatus
+    created_at: datetime
     source: str
     customer: CustomerOut
 
@@ -330,6 +362,7 @@ class DashboardStats(BaseModel):
     bookings_this_week: int
     upcoming: int
     cancelled_this_week: int
+    needs_callback: int
     documents: int
     chunks: int
     by_state: dict[str, int]

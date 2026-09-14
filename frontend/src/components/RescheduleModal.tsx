@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { useToast } from '@/components/ui/Toast'
 import { api } from '@/lib/api'
 import type { Booking, Slot } from '@/lib/types'
-import { cn, formatTime, toISODate } from '@/lib/utils'
+import { cn, formatTime, localDateKey, toISODate } from '@/lib/utils'
 
 interface Props {
   booking: Booking | null
@@ -23,7 +23,12 @@ export function RescheduleModal({ booking, onClose, onDone }: Props) {
 
   useEffect(() => {
     if (!booking) return
-    setDay(toISODate(new Date(booking.starts_at)))
+    // The job's own local day, not the viewer's; a callback lead starts from tomorrow.
+    setDay(
+      booking.starts_at
+        ? localDateKey(booking.starts_at, booking.state)
+        : toISODate(new Date(Date.now() + 86400000)),
+    )
     setPicked(null)
   }, [booking])
 
@@ -33,9 +38,12 @@ export function RescheduleModal({ booking, onClose, onDone }: Props) {
       return
     }
     setSlots(null)
-    const minutes = Math.round(
-      (new Date(booking.ends_at).getTime() - new Date(booking.starts_at).getTime()) / 60000,
-    )
+    const minutes =
+      booking.starts_at && booking.ends_at
+        ? Math.round(
+            (new Date(booking.ends_at).getTime() - new Date(booking.starts_at).getTime()) / 60000,
+          )
+        : 90
     api
       .slots(booking.state, `${day}T00:00:00Z`, minutes)
       .then(setSlots)
@@ -63,7 +71,7 @@ export function RescheduleModal({ booking, onClose, onDone }: Props) {
       title="Reschedule appointment"
       description={
         booking
-          ? `${booking.customer.name}${booking.state ? ` · ${booking.state}` : ''} · currently ${formatTime(booking.starts_at, booking.state)}`
+          ? `${booking.customer.name}${booking.state ? ` · ${booking.state}` : ''} · ${booking.starts_at ? `currently ${formatTime(booking.starts_at, booking.state)}` : 'needs a time'}`
           : undefined
       }
       footer={

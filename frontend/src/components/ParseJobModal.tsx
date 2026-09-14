@@ -6,7 +6,7 @@ import { Textarea, Label, Input } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { api } from '@/lib/api'
 import type { ParsedJob } from '@/lib/types'
-import { formatMoney } from '@/lib/utils'
+import { formatMoney, localDateKey, localTimeKey, stateWallClockToIso } from '@/lib/utils'
 import { stateName } from '@/lib/usStates'
 
 interface Props {
@@ -128,13 +128,13 @@ export function ParseJobModal({ open, onClose, onCreated }: Props) {
               <Input
                 id="date"
                 type="date"
-                value={parsed.starts_at ? parsed.starts_at.slice(0, 10) : ''}
+                value={parsed.starts_at ? localDateKey(parsed.starts_at, parsed.state) : ''}
                 onChange={(e) => {
-                  const time = parsed.starts_at ? parsed.starts_at.slice(11, 16) : '10:00'
+                  const time = parsed.starts_at ? localTimeKey(parsed.starts_at, parsed.state) : '10:00'
                   setParsed({
                     ...parsed,
                     starts_at: e.target.value
-                      ? new Date(`${e.target.value}T${time}:00`).toISOString()
+                      ? stateWallClockToIso(e.target.value, time, parsed.state)
                       : null,
                   })
                 }}
@@ -149,13 +149,13 @@ export function ParseJobModal({ open, onClose, onCreated }: Props) {
                 id="time"
                 type="time"
                 disabled={!parsed.starts_at}
-                value={parsed.starts_at ? parsed.starts_at.slice(11, 16) : ''}
+                value={parsed.starts_at ? localTimeKey(parsed.starts_at, parsed.state) : ''}
                 onChange={(e) => {
                   if (!parsed.starts_at) return
-                  const date = parsed.starts_at.slice(0, 10)
+                  const date = localDateKey(parsed.starts_at, parsed.state)
                   setParsed({
                     ...parsed,
-                    starts_at: new Date(`${date}T${e.target.value}:00`).toISOString(),
+                    starts_at: stateWallClockToIso(date, e.target.value, parsed.state),
                   })
                 }}
               />

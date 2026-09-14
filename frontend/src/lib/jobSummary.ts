@@ -1,4 +1,4 @@
-import type { Booking } from './types'
+import { STATUS_LABEL, type Booking } from './types'
 import { stateName } from './usStates'
 import { formatDate, formatMoney, formatTime } from './utils'
 
@@ -21,8 +21,10 @@ export function jobSummaryText(b: Booking): string {
       ? `Discount: ${formatMoney(b.discount_cents)} off (was ${formatMoney(b.original_price_cents ?? 0)})`
       : null,
     `Detailer: ${b.detailer ?? 'Unassigned'}`,
-    `Date: ${formatDate(b.starts_at)} at ${formatTime(b.starts_at)}`,
-    `Status: ${b.status}`,
+    b.starts_at
+      ? `Date: ${formatDate(b.starts_at, b.state)} at ${formatTime(b.starts_at, b.state)}`
+      : 'Date: Not scheduled yet — call customer back to pick a day/time',
+    `Status: ${STATUS_LABEL[b.status]}`,
     `Source: ${b.source}`,
     b.notes ? `Notes: ${b.notes}` : null,
     `Brand: ${BRAND_LINE}`,

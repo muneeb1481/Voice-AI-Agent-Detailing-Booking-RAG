@@ -27,10 +27,18 @@ from app.schemas import (
     ClassifyVehicleResponse,
     CurrentTimeResponse,
     VoiceBookingCreate,
+    VoiceLeadCreate,
 )
 from app.security import bearer_scheme
 from app.services import booking as booking_service
-from app.services.timezones import period_and_closing_line
+from app.services.timezones import (
+    describe_local,
+    format_clock,
+    parse_clock_time,
+    period_and_closing_line,
+    reinterpret_as_wall_clock,
+    to_local,
+)
 from app.services.us_states import normalize_state
 from app.services import rag
 from app.services.vapi_protocol import SafeToolRoute, parse_tool_call, parse_tool_call_full, tool_response
@@ -148,6 +156,9 @@ class ListSlotsArgs(BaseModel):
         default=None, description="5-digit ZIP — used to derive state if state isn't given."
     )
     day: datetime
+    time: str | None = Field(
+        default=None, description="A specific time the caller asked for, e.g. '3 PM'."
+    )
     duration_minutes: int = Field(default=90, ge=15, le=600)
 
     @field_validator("state")
@@ -158,8 +169,24 @@ class ListSlotsArgs(BaseModel):
         return normalize_state(v)
 
 
+def _state_unknown(tool_call_id: str | None):
+    message = (
+        "We need to know what state this is in — ask the caller directly, we "
+        "couldn't determine it from the ZIP code alone."
+    )
+    if tool_call_id is None:
+        raise HTTPException(status_code=400, detail=message)
+    return tool_response(message, tool_call_id)
+
+
 @router.post("/list_slots", dependencies=[Depends(verify_vapi)])
 async def list_slots(request: Request, db: Session = Depends(get_db)):
+    """Every open start time for the day, in the caller's own local time.
+
+    A live call had the agent say 3 PM was taken when it was open: this used to
+    return only the first 8 slots (8:00-11:30 AM) and as UTC timestamps, so an
+    afternoon time was never in the list. Now all of them come back as spoken
+    local times, and a requested `time` gets a direct yes/no."""
     args_dict, tool_call_id = await parse_tool_call(request)
     args, early = _validated(ListSlotsArgs, args_dict, tool_call_id)
     if early is not None:
@@ -167,20 +194,46 @@ async def list_slots(request: Request, db: Session = Depends(get_db)):
 
     state = args.state or state_from_zip(args.zip_code)
     if state is None:
-        message = (
-            "We need to know what state this is in — ask the caller directly, we "
-            "couldn't determine it from the ZIP code alone."
-        )
-        if tool_call_id is None:
-            raise HTTPException(status_code=400, detail=message)
-        return tool_response(message, tool_call_id)
+        return _state_unknown(tool_call_id)
 
     slots = booking_service.list_slots(db, state, args.day, args.duration_minutes)
-    result = {
+    open_times = [format_clock(to_local(s.starts_at, state)) for s in slots]
+    result: dict = {
+        "date": args.day.date().isoformat(),
+        "day_of_week": args.day.strftime("%A"),
+        "business_hours": "8 AM to 5 PM",
         "count": len(slots),
-        "slots": [s.starts_at.isoformat() for s in slots[:8]],
+        "open_times": open_times,
     }
+    if args.time:
+        requested = parse_clock_time(args.time)
+        if requested is None:
+            result["requested_time_note"] = (
+                f"Couldn't read '{args.time}' as a time — compare against open_times yourself."
+            )
+        else:
+            spoken = format_clock(datetime.combine(args.day.date(), requested))
+            available = spoken in open_times
+            result["requested_time"] = spoken
+            result["requested_time_available"] = available
+            if not available:
+                result["requested_time_note"] = (
+                    "Not open. Tell the caller that time isn't available and ask what "
+                    "other time works for them — don't pick one for them."
+                )
     return tool_response(result, tool_call_id)
+
+
+def _local_start_from_args(args_dict: dict) -> str | None:
+    """Accept `date` + `time` ("2026-09-15" + "3 PM") as the preferred way to give a
+    start, folding it into `starts_at`. Returns an error message if the time is
+    unreadable, else None."""
+    if args_dict.get("date") and args_dict.get("time"):
+        clock = parse_clock_time(str(args_dict["time"]))
+        if clock is None:
+            return f"Couldn't read '{args_dict['time']}' as a time — confirm the exact time with the caller."
+        args_dict["starts_at"] = f"{str(args_dict['date'])[:10]}T{clock.strftime('%H:%M')}:00"
+    return None
 
 
 def _price_entry(price_cents: int, min_price_cents: int | None) -> dict | int:
@@ -318,31 +371,59 @@ def _looks_like_unresolved_phone_template(phone: str) -> bool:
     return "customer.number" in lowered or lowered in {"customer", "number", ""}
 
 
+def _error(message: str, tool_call_id: str | None, status_code: int = 400):
+    if tool_call_id is None:
+        raise HTTPException(status_code=status_code, detail=message)
+    return tool_response(message, tool_call_id)
+
+
+_ASK_FOR_PHONE = (
+    "There's no caller ID on this call (a web test call), so the phone number isn't "
+    "known — ask the caller directly for their phone number, then call this tool "
+    "again with the real digits."
+)
+
+
+def _resolve_phone(args_dict: dict, verified_number: str | None) -> str | None:
+    """The caller's phone comes from Vapi's verified caller ID — the agent never
+    asks for it. Only a web test call (no caller ID) falls back to what the agent
+    passed, and never to unresolved {{customer.number}} placeholder text."""
+    if verified_number:
+        return verified_number
+    supplied = str(args_dict.get("customer_phone") or "")
+    if _looks_like_unresolved_phone_template(supplied):
+        return None
+    return supplied  # a malformed number still fails schema validation normally
+
+
 @router.post("/book_appointment", dependencies=[Depends(verify_vapi)])
 async def book_appointment(request: Request, db: Session = Depends(get_db)):
     args_dict, tool_call_id, verified_number = await parse_tool_call_full(request)
+
+    phone = _resolve_phone(args_dict, verified_number)
+    if phone is None:
+        return _error(_ASK_FOR_PHONE, tool_call_id)
+    args_dict["customer_phone"] = phone
+
+    bad_time = _local_start_from_args(args_dict)
+    if bad_time:
+        return _error(bad_time, tool_call_id)
+
     args, early = _validated(VoiceBookingCreate, args_dict, tool_call_id)
     if early is not None:
         return early
 
-    # Defense-in-depth beyond the system-prompt rule (same pattern as
-    # lookup_appointments): on a real call, always trust Vapi's own verified
-    # caller ID over whatever phone number string the LLM supplied.
-    if verified_number:
-        args.customer_phone = verified_number
-    elif _looks_like_unresolved_phone_template(args.customer_phone):
-        message = (
-            "The phone number you were about to use is just placeholder text, not a "
-            "real number — this happens on web test calls with no caller ID. Ask the "
-            "caller directly for their phone number, then call book_appointment again "
-            "with the real digits."
-        )
-        if tool_call_id is None:
-            raise HTTPException(status_code=400, detail=message)
-        return tool_response(message, tool_call_id)
+    state = args.state or state_from_zip(args.zip_code)
+    if state is None:
+        return _state_unknown(tool_call_id)
+    # The time the agent passes is always the caller's local wall clock.
+    args.starts_at = reinterpret_as_wall_clock(args.starts_at, state)
 
+    lead = booking_service._pending_lead(db, args.lead_id) or booking_service.find_pending_lead(db, phone)
     try:
-        booking = booking_service.create_booking(db, args, source="voice")
+        booking = booking_service.create_booking(
+            db, args, source="voice", lead_id=lead.id if lead else None
+        )
     except HTTPException as exc:
         if tool_call_id is not None:
             return tool_response(str(exc.detail), tool_call_id)
@@ -350,7 +431,7 @@ async def book_appointment(request: Request, db: Session = Depends(get_db)):
 
     result = {
         "booking_id": booking.id,
-        "starts_at": booking.starts_at.isoformat(),
+        **describe_local(booking.starts_at, booking.state),
         "state": booking.state,
         "status": booking.status.value,
         "price_cents": booking.price_cents,
@@ -361,7 +442,37 @@ async def book_appointment(request: Request, db: Session = Depends(get_db)):
         "note": (
             "Read price_cents back to the caller as a dollar amount to confirm it — "
             "that's the final total after any discount actually applied (discount_cents "
-            "may be less than what you asked for if it hit the price floor)."
+            "may be less than what you asked for if it hit the price floor). Say the "
+            "day and time exactly as given in day_of_week/time — never add a timezone."
+        ),
+    }
+    return tool_response(result, tool_call_id)
+
+
+@router.post("/save_lead", dependencies=[Depends(verify_vapi)])
+async def save_lead(request: Request, db: Session = Depends(get_db)):
+    """Call the moment a caller says yes to going ahead (or says they want to book),
+    BEFORE asking for a day/time — so if the call drops, the shop still sees a
+    "needs callback" lead with the phone, vehicle, service and quoted price.
+    Calling it again in the same call just updates that one lead."""
+    args_dict, tool_call_id, verified_number = await parse_tool_call_full(request)
+    phone = _resolve_phone(args_dict, verified_number)
+    if phone is None:
+        return _error(_ASK_FOR_PHONE, tool_call_id)
+
+    args, early = _validated(VoiceLeadCreate, args_dict, tool_call_id)
+    if early is not None:
+        return early
+
+    lead = booking_service.save_lead(db, args, phone)
+    result = {
+        "lead_id": lead.id,
+        "status": lead.status.value,
+        "price_cents": lead.price_cents,
+        "note": (
+            "Saved as a pending request — nothing is scheduled yet, don't tell the "
+            "caller they're booked. Continue: ask what day works for them. Pass this "
+            "lead_id to book_appointment once a time is agreed."
         ),
     }
     return tool_response(result, tool_call_id)
@@ -425,7 +536,7 @@ async def lookup_appointments(request: Request, db: Session = Depends(get_db)):
         "appointments": [
             {
                 "booking_id": b.id,
-                "starts_at": b.starts_at.isoformat(),
+                **describe_local(b.starts_at, b.state),
                 "state": b.state,
                 "vehicle": b.vehicle,
             }
@@ -444,13 +555,20 @@ class RescheduleArgs(BaseModel):
 @router.post("/reschedule_appointment", dependencies=[Depends(verify_vapi)])
 async def reschedule_appointment(request: Request, db: Session = Depends(get_db)):
     args_dict, tool_call_id = await parse_tool_call(request)
+    bad_time = _local_start_from_args(args_dict)
+    if bad_time:
+        return _error(bad_time, tool_call_id)
     args, early = _validated(RescheduleArgs, args_dict, tool_call_id)
     if early is not None:
         return early
 
     try:
+        existing = booking_service._require(db, args.booking_id)
         booking = booking_service.reschedule_booking(
-            db, args.booking_id, args.starts_at, args.duration_minutes
+            db,
+            args.booking_id,
+            reinterpret_as_wall_clock(args.starts_at, existing.state),
+            args.duration_minutes,
         )
     except HTTPException as exc:
         if tool_call_id is not None:
@@ -459,7 +577,7 @@ async def reschedule_appointment(request: Request, db: Session = Depends(get_db)
 
     result = {
         "booking_id": booking.id,
-        "starts_at": booking.starts_at.isoformat(),
+        **describe_local(booking.starts_at, booking.state),
         "status": booking.status.value,
     }
     return tool_response(result, tool_call_id)
