@@ -108,7 +108,9 @@ def _classify_with_llm(text: str) -> str | None:
         f"{', '.join(sorted(_ALL_CATEGORIES))}. "
         f'Vehicle: "{text}". Reply with only the single category word, nothing else.'
     )
-    content = chat_completion([{"role": "user", "content": prompt}], timeout=10)
+    # Total budget across all providers — must finish well inside Vapi's 20s tool
+    # limit; on timeout the agent just asks the caller for the body type instead.
+    content = chat_completion([{"role": "user", "content": prompt}], timeout=6)
     if content is None:
         return None
     content = content.strip().lower()

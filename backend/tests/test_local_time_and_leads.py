@@ -328,3 +328,30 @@ def test_returning_caller_keeps_saved_name_even_if_agent_sends_its_own(client, a
     assert "booking_id" in second
     names = {b["customer"]["name"] for b in client.get("/api/bookings", headers=auth).json()}
     assert names == {"Sara Khan"}
+
+
+def test_web_call_replay_phone_from_lead_and_all_missing_reported(client, auth):
+    """Replays a live web call: phone given to save_lead only, then book_appointment
+    sent no phone, the assistant's own name and a city as the address — and the agent
+    told the caller they were booked. Must report name AND address, reuse the phone."""
+    service_id = _service_id(client, auth, "Interior Detailing Only")
+    lead = _result(client.post("/api/vapi/save_lead", json=_wrapped(
+        "save_lead", {"service_id": service_id, "zip_code": "21201", "customer_phone": "94169084342"},
+        number=None)))
+    assert "NEW CUSTOMER" in lead["note"] and "full name" in lead["note"]
+
+    refused = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment",
+        _book_args(service_id, zip_code="21201", customer_name="Muneeb", address="Baltimore", lead_id=lead["lead_id"]),
+        number=None)))
+    assert refused.startswith("BOOKING FAILED")
+    assert "name" in refused and "street address" in refused
+    assert "phone" not in refused  # taken from the lead
+
+    booked = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment",
+        _book_args(service_id, zip_code="21201", customer_name="Sara Khan", address="12 Elm St", lead_id=lead["lead_id"]),
+        number=None)))
+    assert booked["booking_id"] == lead["lead_id"]
+    row = client.get("/api/bookings", headers=auth).json()[0]
+    assert (row["customer"]["phone"], row["customer"]["name"], row["status"]) == ("94169084342", "Sara Khan", "scheduled")

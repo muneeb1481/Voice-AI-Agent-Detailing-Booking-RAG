@@ -430,10 +430,19 @@ def _resolve_phone(args_dict: dict, verified_number: str | None) -> str | None:
 async def book_appointment(request: Request, db: Session = Depends(get_db)):
     args_dict, tool_call_id, verified_number = await parse_tool_call_full(request)
 
-    phone = _resolve_phone(args_dict, verified_number)
+    # A web call has no caller ID: a live call passed the number the caller said to
+    # save_lead, then left it off book_appointment — take it from that same lead.
+    lead_hint = booking_service._pending_lead(db, args_dict.get("lead_id"))
+    phone = _resolve_phone(args_dict, verified_number) or (
+        lead_hint.customer.phone if lead_hint else None
+    )
+    missing: list[str] = []
     if phone is None:
-        return _error(_ASK_FOR_PHONE, tool_call_id)
-    args_dict["customer_phone"] = phone
+        if tool_call_id is None:
+            return _error(_ASK_FOR_PHONE, tool_call_id)
+        missing.append("their phone number (there's no caller ID on this call)")
+    else:
+        args_dict["customer_phone"] = phone
 
     # Returning caller: reuse the saved name/address when the agent didn't collect
     # a real one. New caller: send the agent back to ask — never book template text.
@@ -445,23 +454,25 @@ async def book_appointment(request: Request, db: Session = Depends(get_db)):
         if known.get("name"):
             args_dict["customer_name"] = known["name"]
         else:
-            return _error(
-                "Nothing was booked yet — you don't have the CUSTOMER's name (and never "
-                "use your own name or placeholder text). Ask \"Can I get your name for "
-                "the appointment?\", then call book_appointment again with their answer.",
-                tool_call_id,
-            )
+            missing.append("the customer's full name (never your own name or placeholder text)")
     if known is not None and not _looks_like_street_address(args_dict.get("address")):
         if known.get("address"):
             args_dict["address"] = known["address"]
             args_dict.setdefault("zip_code", known.get("zip_code"))
         else:
-            return _error(
-                "Nothing was booked yet — you don't have the street address where the "
-                "car will be (a city alone isn't enough). Ask \"What's the street address "
-                "where we'll be detailing the car?\", then call book_appointment again.",
-                tool_call_id,
+            missing.append(
+                "the street address where the car will be (house number and street — "
+                "a city alone isn't enough)"
             )
+    # Report everything missing at once: a live call was refused only for the phone,
+    # then the agent told the caller "your appointment is set" anyway.
+    if missing:
+        return _error(
+            "BOOKING FAILED — NOTHING WAS BOOKED. Do NOT tell the caller they're booked. "
+            "Still needed: " + "; ".join(missing) + ". Ask the caller for each of these, "
+            "one question at a time, then call book_appointment again with everything.",
+            tool_call_id,
+        )
 
     bad_time = _local_start_from_args(args_dict)
     if bad_time:
@@ -539,13 +550,16 @@ async def save_lead(request: Request, db: Session = Depends(get_db)):
         "known_customer": known,
         "note": (
             "Saved as a pending request — nothing is scheduled yet, don't tell the "
-            "caller they're booked. Continue: ask what day works for them. Pass this "
-            "lead_id to book_appointment once a time is agreed."
+            "caller they're booked. Pass this lead_id (and the caller's phone number, if "
+            "you had to ask for it) to book_appointment once a time is agreed."
             + (
                 " RETURNING CUSTOMER: known_customer has their saved details — do NOT ask "
-                "for anything it already has (name/address); use those values when booking."
+                "for anything it already has (name/address); use those values when booking. "
+                "Next, ask what day works for them."
                 if known
-                else ""
+                else " NEW CUSTOMER — your very next questions, one at a time: (1) their "
+                "full name, (2) the street address where the car will be (house number "
+                "and street). Only after you have both, ask what day works for them."
             )
         ),
     }
