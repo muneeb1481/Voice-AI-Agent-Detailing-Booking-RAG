@@ -371,6 +371,23 @@ def _looks_like_unresolved_phone_template(phone: str) -> bool:
     return "customer.number" in lowered or lowered in {"customer", "number", ""}
 
 
+_PLACEHOLDER_WORDS = {"customer name", "name", "unknown", "caller", "customer", "n/a", "na", "none", "tbd"}
+
+
+def _looks_like_placeholder_name(name: str | None) -> bool:
+    """A live call booked "[Customer Name]" — the model filled the required field
+    with template text instead of asking. Never save that as a real name."""
+    cleaned = (name or "").strip().lower()
+    return not cleaned or "[" in cleaned or "{" in cleaned or cleaned in _PLACEHOLDER_WORDS
+
+
+def _looks_like_street_address(address: str | None) -> bool:
+    """A real service address has a house/street number — the same live call booked
+    the city ("Dallas") as the address, which a detailer can't drive to."""
+    cleaned = (address or "").strip()
+    return bool(cleaned) and "[" not in cleaned and any(ch.isdigit() for ch in cleaned)
+
+
 def _error(message: str, tool_call_id: str | None, status_code: int = 400):
     if tool_call_id is None:
         raise HTTPException(status_code=status_code, detail=message)
@@ -404,6 +421,34 @@ async def book_appointment(request: Request, db: Session = Depends(get_db)):
     if phone is None:
         return _error(_ASK_FOR_PHONE, tool_call_id)
     args_dict["customer_phone"] = phone
+
+    # Returning caller: reuse the saved name/address when the agent didn't collect
+    # a real one. New caller: send the agent back to ask — never book template text.
+    # Only for real Vapi calls — the flat admin-test shape keeps plain schema validation.
+    known = (booking_service.known_customer_details(db, phone) or {}) if tool_call_id else None
+    if known is None:
+        pass
+    elif _looks_like_placeholder_name(args_dict.get("customer_name")):
+        if known.get("name"):
+            args_dict["customer_name"] = known["name"]
+        else:
+            return _error(
+                "Nothing was booked yet — you don't have the caller's real name. Ask "
+                "\"Can I get your name for the appointment?\", then call book_appointment "
+                "again with it. Never pass placeholder text as a name.",
+                tool_call_id,
+            )
+    if known is not None and not _looks_like_street_address(args_dict.get("address")):
+        if known.get("address"):
+            args_dict["address"] = known["address"]
+            args_dict.setdefault("zip_code", known.get("zip_code"))
+        else:
+            return _error(
+                "Nothing was booked yet — you don't have the street address where the "
+                "car will be (a city alone isn't enough). Ask \"What's the street address "
+                "where we'll be detailing the car?\", then call book_appointment again.",
+                tool_call_id,
+            )
 
     bad_time = _local_start_from_args(args_dict)
     if bad_time:
@@ -530,8 +575,18 @@ async def lookup_appointments(request: Request, db: Session = Depends(get_db)):
     # customer's bookings. Falls back to the argument only when no verified
     # number is available (a web test call, or the flat/legacy admin-test shape).
     phone = verified_number or args.phone
+    if _looks_like_unresolved_phone_template(phone):
+        # A web test call has no caller ID — the raw template text once matched old
+        # test bookings saved under that same text, reading another "caller's"
+        # appointments aloud. No real number means nothing to look up.
+        return tool_response(
+            {"count": 0, "appointments": [], "known_customer": None,
+             "note": "No caller ID on this call — treat as a new caller."},
+            tool_call_id,
+        )
     bookings = booking_service.find_by_phone(db, phone)
     result = {
+        "known_customer": booking_service.known_customer_details(db, phone),
         "count": len(bookings),
         "appointments": [
             {

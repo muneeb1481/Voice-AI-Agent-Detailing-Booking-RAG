@@ -289,9 +289,11 @@ export function Bookings() {
                         onClick={() => toggle(b.id)}
                         className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5 text-left transition-colors hover:bg-[rgb(var(--bg-subtle))]"
                       >
-                        <div className="w-24 shrink-0 tabular-nums">
+                        <div className="w-28 shrink-0 tabular-nums">
                           <p className="text-sm font-medium">{formatTime(b.starts_at, b.state)}</p>
-                          <p className="text-[11px] text-muted">{formatTime(b.ends_at, b.state)}</p>
+                          <p className="text-[11px] text-muted">
+                            until {formatTime(b.ends_at, b.state)}
+                          </p>
                         </div>
 
                         <div className="min-w-[10rem] flex-1">

@@ -565,6 +565,25 @@ was brand new, containing only Vapi's default blank template and its demo
 There was nothing to actually clone from on this account; it was built to
 match accounts 1/2 instead, which serve as the real reference implementation.
 
+## Local-time + callback-lead update (2026-09-14)
+
+Applied to all three accounts via the API. The system prompt and every tool
+definition now come from `vapi-tools.json` (`VAPI_SYSTEM_PROMPT.md` mirrors the
+prompt), which supersedes the older per-tool tables above:
+
+- `list_slots` returns ALL open times as local spoken times (`open_times`,
+  e.g. "3:00 PM") plus `requested_time_available` when a `time` is passed.
+  It used to return only the first 8 slots in UTC, so afternoon times were
+  never visible and the agent wrongly said they were taken.
+- `book_appointment` / `reschedule_appointment` take `date` + `time` in the
+  caller's local time; the backend applies the job state's timezone (from ZIP
+  or city/state). The agent never says a timezone. Phone comes from caller ID.
+- New tool `save_lead` (`/api/vapi/save_lead`), attached to each assistant:
+  called when the caller says yes to the quoted service, before day/time. It
+  creates a `pending` "needs callback" booking that book_appointment later
+  converts into the scheduled appointment.
+- Business hours are 8 AM-5 PM in the job's own state.
+
 All three accounts now share: the same tightened `onNoPunctuationSeconds`
 (2.5s → 1.3s, addresses bug 1.2's dead-air complaint after short answers
 like "interior" — `onNumberSeconds` stays at 3s, unaffected, so ZIP-digit

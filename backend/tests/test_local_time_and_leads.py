@@ -217,3 +217,60 @@ def test_admin_move_schedules_a_lead(client, auth):
     assert moved.status_code == 200, moved.text
     assert moved.json()["status"] == "scheduled"
     assert moved.json()["ends_at"] is not None
+
+
+def _book_args(service_id, **over):
+    base = {
+        "zip_code": "75201",
+        "date": _day(),
+        "time": "11 AM",
+        "service_id": service_id,
+        "vehicle": "Toyota Camry",
+    }
+    base.update(over)
+    return base
+
+
+def test_placeholder_name_and_city_address_are_sent_back_to_ask(client, auth):
+    """Live call: the agent booked customer_name "[Customer Name]" and address
+    "Dallas" without ever asking. Nothing may be booked from that."""
+    service_id = _service_id(client, auth)
+    no_name = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, customer_name="[Customer Name]", address="12 Elm St"))))
+    assert isinstance(no_name, str) and "name" in no_name.lower()
+
+    city_only = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, customer_name="Sam Lee", address="Dallas"))))
+    assert isinstance(city_only, str) and "street address" in city_only.lower()
+    assert client.get("/api/bookings", headers=auth).json() == []
+
+
+def test_returning_caller_name_and_address_are_reused(client, auth):
+    service_id = _service_id(client, auth)
+    first = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, customer_name="Sam Lee", address="12 Elm St"))))
+    assert "booking_id" in first
+
+    lookup = _result(client.post("/api/vapi/lookup_appointments", json=_wrapped(
+        "lookup_appointments", {"phone": "{{customer.number}}"})))
+    assert lookup["known_customer"]["name"] == "Sam Lee"
+    assert lookup["known_customer"]["address"] == "12 Elm St"
+
+    second = _result(client.post("/api/vapi/book_appointment", json=_wrapped(
+        "book_appointment", _book_args(service_id, time="2 PM"))))  # no name/address given
+    assert "booking_id" in second
+    newest = next(b for b in client.get("/api/bookings", headers=auth).json() if b["id"] == second["booking_id"])
+    assert newest["customer"]["name"] == "Sam Lee" and newest["address"] == "12 Elm St"
+
+
+def test_lookup_with_unresolved_placeholder_never_matches_anyone(client, auth):
+    """A web call's literal {{customer.number}} matched old test bookings saved
+    under that text and read out someone else's appointments."""
+    service_id = _service_id(client, auth)
+    client.post("/api/vapi/book_appointment", json={
+        **_book_args(service_id, customer_name="Old Test", address="1 Main St"),
+        "customer_phone": "{{customer.number}}x",  # legacy bad row shape
+    })
+    result = _result(client.post("/api/vapi/lookup_appointments", json=_wrapped(
+        "lookup_appointments", {"phone": "{{customer.number}}"}, number=None)))
+    assert result["count"] == 0 and result["known_customer"] is None

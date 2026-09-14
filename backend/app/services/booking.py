@@ -546,6 +546,28 @@ def set_status(db: Session, booking_id: str, new_status: BookingStatus) -> Booki
     return booking
 
 
+def known_customer_details(db: Session, phone: str) -> dict | None:
+    """A returning caller's saved name and service address, from their most recent
+    booking — so the agent confirms these instead of asking all over again."""
+    rows = db.execute(
+        select(Booking)
+        .join(Customer)
+        .where(Customer.phone == phone)
+        .order_by(Booking.created_at.desc())
+        .limit(10)
+    ).scalars().all()
+    if not rows:
+        return None
+    name = rows[0].customer.name
+    with_address = next((b for b in rows if b.address), None)
+    return {
+        "name": None if name in ("", "Unknown caller") else name,
+        "address": with_address.address if with_address else None,
+        "zip_code": with_address.zip_code if with_address else None,
+        "state": with_address.state if with_address else None,
+    }
+
+
 def find_by_phone(db: Session, phone: str) -> list[Booking]:
     return list(
         db.execute(
