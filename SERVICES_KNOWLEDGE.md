@@ -169,10 +169,15 @@ only fires when nothing in the list below matches.
 
 ## 5. Booking rules
 
-- **Hours**: 8:00 AM – 6:00 PM, **in the customer's own local time** (real
+- **Hours**: 8:00 AM – 5:00 PM, **in the customer's own local time** (real
   per-state timezone lookup, not server UTC) — 7 days a week.
 - **Booking window**: up to 60 days ahead; nothing in the past.
-- **Service area**: fully mobile, all US states.
+- **Service area**: fully mobile, all US states — we come to the customer.
+- **Estimated times told to callers** (conversation only — calendar slot lengths
+  still come from each service's `duration_minutes`; actual time depends on
+  condition): interior 1–2 h, exterior 1–2 h, full interior + exterior 2–3 h,
+  ceramic coating 4–5 h, paint correction 4–7 h. Source: `knowledge/shinepro-faq.md`
+  (uploaded to the RAG index) and the system prompt's COMMON QUESTIONS section.
 - Vehicle access and a parking space needed; the crew brings their own water
   and power.
 
